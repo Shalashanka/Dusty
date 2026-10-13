@@ -1,4 +1,5 @@
 mod actions;
+mod buddy;
 mod commands;
 mod detect;
 mod health;
@@ -18,6 +19,8 @@ mod thumbs;
 mod timeutil;
 mod toast;
 mod tray;
+mod updater;
+mod voice;
 mod walk;
 mod watcher;
 mod winsys;
@@ -34,36 +37,67 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
-/// Spotlight-style search: toggles the floating search window.
+/// Opens the floating Dusty bar in a mode: "search", "commands" or "voice".
+/// Pressing the same shortcut again while it's open closes it.
 pub fn toggle_search(app: &AppHandle) {
+    open_bar(app, "search");
+}
+
+pub fn open_bar(app: &AppHandle, mode: &str) {
     let Some(w) = app.get_webview_window("search") else {
         return;
     };
-    if w.is_visible().unwrap_or(false) {
+    let current = BAR_MODE.lock().clone();
+    if w.is_visible().unwrap_or(false) && current == mode && mode != "voice" {
         let _ = w.hide();
-    } else {
-        let _ = w.center();
-        let _ = w.show();
-        let _ = w.set_focus();
-        let _ = app.emit_to("search", "search-open", ());
+        return;
+    }
+    *BAR_MODE.lock() = mode.to_string();
+    let _ = w.center();
+    let _ = w.show();
+    let _ = w.set_focus();
+    let _ = app.emit_to("search", "search-open", mode);
+    if mode == "voice" {
+        let state = app.state::<AppState>();
+        let (enabled, model) = {
+            let s = state.settings.read();
+            (s.voice_enabled, s.voice_model.clone())
+        };
+        if enabled {
+            voice::listen(app.clone(), model);
+        }
     }
 }
 
-/// (Re)binds the global search hotkey from settings.
+static BAR_MODE: parking_lot::Mutex<String> = parking_lot::Mutex::new(String::new());
+/// Shortcut id -> bar mode.
+static HOTKEYS: parking_lot::Mutex<Vec<(u32, &'static str)>> = parking_lot::Mutex::new(Vec::new());
+
+/// (Re)binds the global shortcuts from settings.
 pub fn register_hotkey(app: &AppHandle) -> Result<(), String> {
-    let combo = app
-        .state::<AppState>()
-        .settings
-        .read()
-        .search_hotkey
-        .clone();
+    use tauri_plugin_global_shortcut::Shortcut;
+    let (search, palette, voice) = {
+        let s = app.state::<AppState>().settings.read().clone();
+        (s.search_hotkey, s.palette_hotkey, s.voice_hotkey)
+    };
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
-    if combo.trim().is_empty() {
-        return Ok(());
+    let mut map = Vec::new();
+    let mut errors = Vec::new();
+    for (combo, mode) in [(search, "search"), (palette, "commands"), (voice, "voice")] {
+        if combo.trim().is_empty() {
+            continue;
+        }
+        match combo.parse::<Shortcut>() {
+            Ok(sc) => match gs.register(sc) {
+                Ok(()) => map.push((sc.id(), mode)),
+                Err(e) => errors.push(format!("{combo}: {e}")),
+            },
+            Err(e) => errors.push(format!("{combo}: {e}")),
+        }
     }
-    gs.register(combo.as_str())
-        .map_err(|e| format!("couldn't use {combo} as a shortcut: {e}"))
+    *HOTKEYS.lock() = map;
+    if errors.is_empty() { Ok(()) } else { Err(format!("couldn't use {}", errors.join(", "))) }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -82,9 +116,10 @@ pub fn run() {
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
-                        toggle_search(app);
+                        let mode = HOTKEYS.lock().iter().find(|(id, _)| *id == shortcut.id()).map(|(_, m)| *m);
+                        open_bar(app, mode.unwrap_or("search"));
                     }
                 })
                 .build(),
@@ -110,6 +145,7 @@ pub fn run() {
             watcher::start(app.handle());
             scheduler::start(app.handle().clone());
             let _ = register_hotkey(app.handle());
+            voice::warm_up(app.handle().clone());
             // Safety net: if the UI hasn't asked to be shown after a few
             // seconds (slow first WebView start), show the window anyway.
             if !hidden {
@@ -133,8 +169,8 @@ pub fn run() {
                 api.prevent_close();
                 let _ = window.hide();
             }
-            // The search popup disappears when you click elsewhere.
-            WindowEvent::Focused(false) if window.label() == "search" => {
+            // Popups disappear when you click elsewhere.
+            WindowEvent::Focused(false) if window.label() == "search" || window.label() == "traymenu" => {
                 let _ = window.hide();
             }
             _ => {}
@@ -194,6 +230,18 @@ pub fn run() {
             commands::app_info,
             commands::toggle_search,
             commands::add_mirror,
+            commands::check_update,
+            commands::install_update,
+            commands::voice_status,
+            commands::voice_download,
+            commands::voice_listen,
+            commands::voice_stop,
+            commands::open_bar,
+            commands::bar_command,
+            commands::buddy_done,
+            commands::buddy_test,
+            commands::hide_traymenu,
+            commands::quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dusty");

@@ -3,7 +3,7 @@
 use crate::winsys;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_winrt_notification::{Duration, Sound, Toast};
 
 pub const APP_ID: &str = "com.griz.dusty";
@@ -57,6 +57,17 @@ fn on_action(app: &AppHandle, action: Option<&str>) {
         Some("quick") => {
             let a = app.clone();
             std::thread::spawn(move || crate::scheduler::quick_clean(&a));
+        }
+        Some("update") => {
+            let a = app.clone();
+            std::thread::spawn(move || {
+                let src = a.state::<crate::state::AppState>().settings.read().update_source.clone();
+                if let Ok((_, installer)) = crate::updater::download(&src) {
+                    if crate::updater::run_installer(&installer, false).is_ok() {
+                        a.exit(0);
+                    }
+                }
+            });
         }
         Some("history") => {
             crate::show_main(app);

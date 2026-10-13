@@ -7,6 +7,8 @@
   import Counter from "$lib/components/Counter.svelte";
   import Ring from "$lib/components/Ring.svelte";
   import DriveChips from "$lib/components/DriveChips.svelte";
+  import ThoughtBubble from "$lib/components/ThoughtBubble.svelte";
+  import DustMotes from "$lib/components/DustMotes.svelte";
   import { app } from "$lib/app.svelte";
   import { api, type Kind, type Finding } from "$lib/api";
   import { KINDS, KIND_ORDER } from "$lib/kinds";
@@ -23,6 +25,28 @@
   const totals = $derived(
     shownDrives.reduce((a, d) => ({ total: a.total + d.total, free: a.free + d.free }), { total: 0, free: 0 }),
   );
+
+  /** What Dusty muses about, based on what's actually going on. */
+  const thoughts = $derived.by(() => {
+    const t: string[] = [];
+    const top = groups[0];
+    if (top) {
+      t.push(
+        top[0] === "folder_plan"
+          ? "I drew up a tidy plan for you ✨"
+          : `Psst… ${KINDS[top[0]].label.toLowerCase()}: ${top[1].length}. Want a look?`,
+      );
+    }
+    const week = app.snap?.stats.freedWeek ?? 0;
+    if (week > 0) t.push(`We freed ${bytes(week)} this week. Proud of us!`);
+    const streak = app.snap?.stats.streakDays ?? 0;
+    if (streak >= 2) t.push(`${streak}-day tidy streak 🔥`);
+    if (app.index?.ready) t.push(`I know where all ${(app.index.entries / 1e6).toFixed(1)}M files are. Try ${app.settings?.searchHotkey}!`);
+    if (app.settings && !app.settings.voiceEnabled) t.push("Psst, you can talk to me now. Settings › Voice 🎙");
+    if (app.bin[0] > 1 << 30) t.push(`The Recycle Bin is holding ${bytes(app.bin[0])}…`);
+    t.push("I'll tidy up while you're away.", "Humming while I dust… 🎵", "Pet me, I don't bite 🧹");
+    return t;
+  });
 
   let tick = $state(Date.now());
   $effect(() => {
@@ -70,12 +94,14 @@
 </script>
 
 <div class="home scroll">
+  <DustMotes />
   <section class="hero" in:fade={{ duration: 300 }}>
     <div class="mascot-wrap">
+      <ThoughtBubble lines={thoughts} />
       <Mascot {mood} size={180} />
     </div>
     <div class="copy">
-      <p class="hello">{greeting()}.</p>
+      <p class="hello">{greeting()}</p>
       {#key mood + app.phase}
         <h1 in:fly={{ y: 8, duration: 400, easing: cubicOut }}>
           {#if app.scanning}
@@ -237,6 +263,7 @@
 
 <style>
   .home {
+    position: relative;
     height: 100%;
     padding: 42px 40px 60px;
   }
@@ -248,6 +275,11 @@
   }
   .mascot-wrap {
     flex: none;
+    position: relative;
+  }
+  .home > :global(:not(.motes)) {
+    position: relative;
+    z-index: 1;
   }
   .hello {
     margin: 0 0 4px;

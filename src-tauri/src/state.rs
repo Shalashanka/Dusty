@@ -38,6 +38,7 @@ pub struct AppState {
     pub live_procs: AtomicBool,
     /// When the current scan started (0 when idle).
     pub scan_started: AtomicI64,
+    pub voice: crate::voice::VoiceState,
 }
 
 impl AppState {
@@ -69,6 +70,7 @@ impl AppState {
             procs: Mutex::new(Monitor::new()),
             live_procs: AtomicBool::new(false),
             scan_started: AtomicI64::new(0),
+            voice: Default::default(),
         }
     }
 

@@ -139,6 +139,14 @@ export interface Settings {
   seenVersion: number;
   devMode: boolean;
   mirrors: { a: string; b: string }[];
+  updateSource: string;
+  autoInstall: boolean;
+  voiceEnabled: boolean;
+  voiceModel: string;
+  voiceReply: boolean;
+  voiceHotkey: string;
+  paletteHotkey: string;
+  wander: boolean;
 }
 
 export interface Outcome {
@@ -331,11 +339,49 @@ export interface AppInfo {
   debug: boolean;
 }
 
+export interface UpdateInfo {
+  current: string;
+  available: string | null;
+  notes: string;
+  date: string;
+  source: string;
+}
+
+export interface VoiceModel {
+  id: string;
+  name: string;
+  sizeMb: number;
+  languages: string;
+  installed: boolean;
+}
+
+export interface VoiceStatus {
+  model: string;
+  installed: boolean;
+  sizeMb: number;
+  downloading: boolean;
+  listening: boolean;
+  hasMic: boolean;
+  models: VoiceModel[];
+}
+
 export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
   ready: () => invoke<void>("ready"),
   scanNow: () => invoke<void>("scan_now"),
   addMirror: (a: string, b: string) => invoke<void>("add_mirror", { a, b }),
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  installUpdate: (quiet: boolean) => invoke<void>("install_update", { quiet }),
+  voiceStatus: () => invoke<VoiceStatus>("voice_status"),
+  voiceDownload: (model: string) => invoke<void>("voice_download", { model }),
+  voiceListen: () => invoke<void>("voice_listen"),
+  voiceStop: () => invoke<void>("voice_stop"),
+  openBar: (mode: "search" | "commands" | "voice") => invoke<void>("open_bar", { mode }),
+  barCommand: (cmd: string) => invoke<string>("bar_command", { cmd }),
+  buddyDone: () => invoke<void>("buddy_done"),
+  buddyTest: (message?: string) => invoke<void>("buddy_test", { message }),
+  hideTraymenu: () => invoke<void>("hide_traymenu"),
+  quitApp: () => invoke<void>("quit_app"),
   act: (ids: string[], action: Action) => invoke<Outcome>("act", { ids, action }),
   undo: (historyId: number) => invoke<void>("undo", { historyId }),
   history: (limit?: number) => invoke<HistoryRow[]>("history", { limit }),

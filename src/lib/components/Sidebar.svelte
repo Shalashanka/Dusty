@@ -32,8 +32,10 @@
       </defs>
       <circle cx="20" cy="22" r="14" fill="url(#lg)" />
       <path d="M7 19 Q8 7 20 7 Q32 7 33 19 Q27 15 20 15 Q13 15 7 19Z" fill="#ff7a90" />
-      <ellipse cx="15.5" cy="21.5" rx="2" ry="2.7" fill="#1d1a2e" />
-      <ellipse cx="24.5" cy="21.5" rx="2" ry="2.7" fill="#1d1a2e" />
+      <g class="eyes">
+        <ellipse cx="15.5" cy="21.5" rx="2" ry="2.7" fill="#1d1a2e" />
+        <ellipse cx="24.5" cy="21.5" rx="2" ry="2.7" fill="#1d1a2e" />
+      </g>
       <path d="M17.5 27 q2.5 2.3 5 0" stroke="#1d1a2e" stroke-width="1.4" fill="none" stroke-linecap="round" />
     </svg>
   </div>
@@ -45,8 +47,13 @@
       <button class="item" class:active={app.view === it.id} onclick={() => app.go(it.id)} title="{it.label} ({it.key})">
         <span class="icon">
           <Icon size={20} strokeWidth={app.view === it.id ? 2.2 : 1.8} />
-          {#if it.id === "triage" && app.allFindings.length}
-            <span class="badge">{app.allFindings.length > 99 ? "99+" : app.allFindings.length}</span>
+          {#if it.id === "triage" && app.findings.length}
+            {#key app.findings.length}
+              <span class="badge">{app.findings.length > 99 ? "99+" : app.findings.length}</span>
+            {/key}
+          {/if}
+          {#if it.id === "rules" && app.updateAvailable}
+            <span class="badge upd" title="Dusty {app.updateAvailable} is ready">↑</span>
           {/if}
         </span>
         <span class="label">{it.label}</span>
@@ -84,6 +91,31 @@
     background: color-mix(in srgb, var(--surface) 60%, transparent);
     position: relative;
     z-index: 401;
+  }
+  .logo :global(.eyes) {
+    transform-origin: 20px 21.5px;
+    animation: lblink 6s infinite;
+  }
+  @keyframes lblink {
+    0%,
+    94%,
+    100% {
+      transform: scaleY(1);
+    }
+    96% {
+      transform: scaleY(0.1);
+    }
+  }
+  .logo:hover svg {
+    animation: wiggle 0.6s ease-in-out;
+  }
+  @keyframes wiggle {
+    25% {
+      transform: rotate(-10deg);
+    }
+    75% {
+      transform: rotate(8deg);
+    }
   }
   .logo {
     height: 44px;
@@ -139,6 +171,9 @@
     font-size: 11px;
     font-weight: 600;
   }
+  .badge.upd {
+    background: var(--accent);
+  }
   .badge {
     position: absolute;
     top: -7px;
@@ -154,6 +189,12 @@
     display: grid;
     place-items: center;
     box-shadow: 0 0 0 2px var(--bg-solid);
+    animation: pop 0.35s var(--spring);
+  }
+  @keyframes pop {
+    from {
+      transform: scale(0.4);
+    }
   }
   .bottom {
     margin-top: auto;

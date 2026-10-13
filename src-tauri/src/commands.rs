@@ -112,7 +112,9 @@ pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings)
     state.store.save_settings(&settings);
     let drives_changed =
         old.drives != settings.drives || old.index_enabled != settings.index_enabled;
-    let hotkey_changed = old.search_hotkey != settings.search_hotkey;
+    let hotkey_changed = old.search_hotkey != settings.search_hotkey
+        || old.palette_hotkey != settings.palette_hotkey
+        || old.voice_hotkey != settings.voice_hotkey;
     *state.settings.write() = settings;
     crate::watcher::start(&app);
     if drives_changed {
@@ -361,8 +363,9 @@ pub async fn space_tree(
 ) -> R<crate::index::TreeNode> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
+        state.index.apply_removals();
         if let Some(idx) = state.index.get()
-            && let Some(t) = crate::index::tree(&idx, &path, depth.unwrap_or(3))
+            && let Some(t) = crate::index::tree(&idx, &path, depth.unwrap_or(3), &state.index.adjust.read())
         {
             return Ok(t);
         }
@@ -819,4 +822,143 @@ pub fn add_mirror(app: AppHandle, state: State<AppState>, a: String, b: String) 
     crate::tray::refresh(&app);
     crate::scheduler::emit_changed(&app);
     Ok(())
+}
+
+// ---- updates ------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> R<crate::updater::UpdateInfo> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let src = app.state::<AppState>().settings.read().update_source.clone();
+        crate::updater::check(&src, &app.package_info().version.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle, quiet: bool) -> R<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let src = app.state::<AppState>().settings.read().update_source.clone();
+        let (_, installer) = crate::updater::download(&src)?;
+        crate::updater::run_installer(&installer, quiet)?;
+        // The installer replaces our files; get out of its way.
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        app.exit(0);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---- voice --------------------------------------------------------------------
+
+#[tauri::command(async)]
+pub fn voice_status(state: State<AppState>) -> crate::voice::VoiceStatus {
+    let model = state.settings.read().voice_model.clone();
+    crate::voice::status(&state.data_dir, &state.voice, &model)
+}
+
+#[tauri::command]
+pub async fn voice_download(app: AppHandle, model: String) -> R<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        crate::voice::download(&app, &state.data_dir, &state.voice, &model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command(async)]
+pub fn voice_listen(app: AppHandle, state: State<AppState>) {
+    let model = state.settings.read().voice_model.clone();
+    crate::voice::listen(app.clone(), model);
+}
+
+#[tauri::command(async)]
+pub fn voice_stop(state: State<AppState>) {
+    crate::voice::stop(&state.voice);
+}
+
+#[tauri::command(async)]
+pub fn open_bar(app: AppHandle, mode: String) {
+    crate::open_bar(&app, &mode);
+}
+
+/// Runs a palette command from the floating bar (no main window needed).
+#[tauri::command(async)]
+pub fn bar_command(app: AppHandle, state: State<AppState>, cmd: String) -> R<String> {
+    match cmd.as_str() {
+        "scan" => {
+            state.request_scan();
+            Ok("Looking around now".into())
+        }
+        "pause" => {
+            let until = now() + 3 * 3600;
+            state.paused_until.store(until, Ordering::Relaxed);
+            state.store.set("paused_until", &until.to_string());
+            crate::tray::refresh(&app);
+            crate::scheduler::emit_changed(&app);
+            Ok("Napping for 3 hours".into())
+        }
+        "resume" => {
+            state.paused_until.store(0, Ordering::Relaxed);
+            state.store.set("paused_until", "0");
+            crate::tray::refresh(&app);
+            crate::scheduler::emit_changed(&app);
+            Ok("Awake again".into())
+        }
+        "clean_sure" => {
+            let ids: Vec<String> = state
+                .findings
+                .read()
+                .iter()
+                .filter(|f| {
+                    f.confidence >= 0.85
+                        && matches!(f.suggested, crate::model::Action::Recycle | crate::model::Action::Delete)
+                        && f.kind.is_file_based()
+                })
+                .map(|f| f.id.clone())
+                .collect();
+            let n = ids.len();
+            state.store.set("quick_ids", &serde_json::to_string(&ids).unwrap_or_default());
+            let a = app.clone();
+            std::thread::spawn(move || crate::scheduler::quick_clean(&a));
+            Ok(format!("Cleaning {n} sure things"))
+        }
+        "empty_bin" => {
+            crate::winsys::empty_recycle_bin()?;
+            crate::scheduler::emit_changed(&app);
+            Ok("Recycle Bin emptied".into())
+        }
+        view if view.starts_with("view:") => {
+            hide_search(app.clone());
+            crate::show_main(&app);
+            let _ = tauri::Emitter::emit(&app, "navigate", &view[5..]);
+            Ok(String::new())
+        }
+        _ => Err("unknown command".into()),
+    }
+}
+
+#[tauri::command(async)]
+pub fn buddy_done(app: AppHandle) {
+    crate::buddy::done(&app);
+}
+
+#[tauri::command(async)]
+pub fn buddy_test(app: AppHandle, message: Option<String>) {
+    crate::buddy::stroll(&app, message.as_deref().unwrap_or("Hi! Just passing by 👋"), "happy");
+}
+
+#[tauri::command(async)]
+pub fn hide_traymenu(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("traymenu") {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command(async)]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
 }

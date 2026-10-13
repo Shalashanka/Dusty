@@ -59,6 +59,8 @@ fn run(app: AppHandle) {
             continue;
         }
         maybe_digest(&app);
+        maybe_update(&app);
+        crate::buddy::maybe_stroll(&app);
         let due = state.schedule.lock().next_due;
         if t < due {
             continue;
@@ -106,6 +108,10 @@ fn index_loop(app: AppHandle) {
         }
         for _ in 0..60 {
             std::thread::sleep(Duration::from_secs(5));
+            // Keep Space accurate between rebuilds; too many changes -> rebuild soon.
+            if state.index.apply_removals() {
+                state.index.rebuild.store(true, Ordering::SeqCst);
+            }
             if state.index.rebuild.load(Ordering::Relaxed) {
                 break;
             }
@@ -212,6 +218,7 @@ pub fn run_scan(app: &AppHandle, background: bool) {
     let started = Instant::now();
     state.scan_started.store(now(), Ordering::Relaxed);
     set_phase(app, "Waking up");
+    tray::set_busy(app, true);
     emit_changed(app);
 
     let settings = state.settings.read().clone();
@@ -353,6 +360,7 @@ pub fn run_scan(app: &AppHandle, background: bool) {
 
     set_phase(app, "");
     state.scan_started.store(0, Ordering::Relaxed);
+    tray::set_busy(app, false);
     state.scanning.store(false, Ordering::SeqCst);
     tray::refresh(app);
     emit_changed(app);
@@ -488,6 +496,43 @@ pub fn quick_clean(app: &AppHandle) {
         ),
         &[("Open history", "history")],
     );
+}
+
+/// Every 6 hours: is there a newer Dusty? Install it quietly while the user
+/// is away (if allowed), otherwise offer it with a toast.
+fn maybe_update(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if now() - state.store.get_i64("last_update_check") < 6 * 3600 {
+        return;
+    }
+    state.store.set("last_update_check", &now().to_string());
+    let (source, auto) = {
+        let s = state.settings.read();
+        (s.update_source.clone(), s.auto_install)
+    };
+    let current = app.package_info().version.to_string();
+    let Ok(info) = crate::updater::check(&source, &current) else { return };
+    let Some(version) = info.available else { return };
+    let _ = app.emit("update-available", &version);
+    let idle = winsys::idle_secs() >= 10 * 60;
+    let window_open = app.get_webview_window("main").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false);
+    if auto && idle && !window_open && !state.scanning.load(Ordering::Relaxed) {
+        if let Ok((_, installer)) = crate::updater::download(&source) {
+            if crate::updater::run_installer(&installer, true).is_ok() {
+                app.exit(0);
+            }
+        }
+        return;
+    }
+    if can_ping(app, false) && state.store.get("update_offered").as_deref() != Some(version.as_str()) {
+        state.store.set("update_offered", &version);
+        toast::show(
+            app,
+            &format!("Dusty {version} is ready"),
+            if info.notes.is_empty() { "A fresh version with fixes and new tricks." } else { &info.notes },
+            &[("Update now", "update"), ("Later", "later")],
+        );
+    }
 }
 
 fn maybe_digest(app: &AppHandle) {

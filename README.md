@@ -5,7 +5,8 @@
 # Dusty
 
 **A tiny housekeeper that lives in your Windows tray.**
-It quietly looks around while you're away, notices what's gathering dust, and asks before touching anything.
+It quietly keeps your files tidy, finds anything you ask for (even by voice) and makes Windows feel
+freshly installed again. Specialized, fast and **100% on your computer**: no cloud, no account, no telemetry.
 
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&logoColor=white)
 ![Rust](https://img.shields.io/badge/core-Rust-000000?logo=rust)
@@ -69,6 +70,17 @@ A whole-drive index (millions of files, searched in milliseconds) behind a **glo
 
 <img src="docs/screenshots/search.png" width="560" alt="Search" />
 
+### 🎙️ Ask out loud
+Press `Ctrl+Alt+D` and say *"find the invoice PDF I downloaded about five months ago"*.
+Speech is recognised **on your PC** by small open models (Moonshine for English, NVIDIA Parakeet
+for 25 languages), in about a third of a second. Dusty shows how it understood you and searches.
+It can answer out loud with your local Windows voices (off by default). Voice only *searches*;
+it never controls your PC.
+
+### ⌨️ Commands from anywhere
+`Ctrl+Alt+K` opens the command palette even when Dusty is in the tray: start tidying, clean the
+sure ones, empty the Recycle Bin, pause, jump to any view. Right-click the tray icon for the same.
+
 ### 🗺️ Shows where the space went
 A SpaceSniffer-style nested map of any drive or folder — instant from the index, with right-click
 actions and labels for caches Dusty knows are safe to clear.
@@ -95,11 +107,20 @@ actions and labels for caches Dusty knows are safe to clear.
 </tr>
 </table>
 
+## Private by design
+
+- **Everything runs locally:** indexing, detection, speech recognition and search. Nothing about
+  your files or your voice leaves the PC. No telemetry, no account.
+- **Open source:** you can read exactly what Dusty reads and writes.
+- **Signed updates:** Dusty checks for new versions and installs them itself, but only if the
+  package carries a valid signature from the project key; anything else is refused.
+- **Least privilege:** admin rights are requested only for the specific tune-up that needs them.
+
 ## Keyboard
 
 | Where | Keys |
 |---|---|
-| Anywhere in Windows | `Ctrl+Alt+Space` search |
+| Anywhere in Windows | `Ctrl+Alt+Space` search · `Ctrl+Alt+K` commands · `Ctrl+Alt+D` voice (all editable in Settings) |
 | App | `1`–`6` switch views · `Ctrl+K` command palette · `Z` undo |
 | Tidy | `←` remove · `→` keep · `↓` later · `Enter` open · `O` show in folder · `L` list view |
 | Search | `Enter` open · `Ctrl+Enter` show in folder · `Ctrl+C` copy path |
@@ -109,7 +130,9 @@ actions and labels for caches Dusty knows are safe to clear.
 ```
 Rust core (src-tauri)                         Svelte 5 UI (src)
 ├─ index      whole-drive file index          ├─ Home, Tidy, Space, Speed, History, Settings
-├─ nlq        natural-language queries        ├─ search popup (separate window)
+├─ nlq        natural-language queries        ├─ search / commands / voice bar (popup)
+├─ voice      on-device speech (sherpa-onnx)  ├─ tray menu, desktop buddy (popups)
+├─ updater    signed auto-updates             │
 ├─ detect/*   detectors                       └─ preview mode with a mocked backend
 ├─ kb.json    app cache knowledge base
 ├─ organize   classifier + plans
@@ -139,9 +162,22 @@ cargo test --release real_scan  -- --ignored --nocapture   # read-only scan of t
 cargo test --release real_index -- --ignored --nocapture   # index all drives, time searches
 ```
 
+The speech engine is linked statically; its bindings need libclang once:
+`pip install libclang --target src-tauri/.tools/libclang` (picked up by `src-tauri/.cargo/config.toml`).
+
+### Releases & updates
+
+```powershell
+scripts/release.ps1 -Version 0.3.1 -Notes "What changed"
+```
+
+Bumps the version, builds a signed installer (key in `~/.tauri/dusty.key`, never committed) and writes
+it with `latest.json` to `releases/`. Installed copies check their update source (a folder or an
+HTTPS URL, set in Settings › About) every few hours and update themselves when you're away.
+
 **Buy me a coffee link:** set `coffeeUrl` in [`src/lib/config.ts`](src/lib/config.ts) and rebuild.
 
-See [docs/PLAN.md](docs/PLAN.md) for the design and roadmap, and [docs/TESTING.md](docs/TESTING.md) for the manual test checklist.
+See [docs/PLAN.md](docs/PLAN.md), [docs/V1.md](docs/V1.md) (road to 1.0), [docs/DESIGN.md](docs/DESIGN.md) (design philosophy), [docs/MASCOT.md](docs/MASCOT.md) (mascot prompts) and [docs/TESTING.md](docs/TESTING.md) for the manual test checklist.
 
 ---
 

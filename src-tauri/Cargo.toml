@@ -1,6 +1,6 @@
 [package]
 name = "dusty"
-version = "0.2.1"
+version = "0.3.0"
 description = "A tiny housekeeper for your PC"
 authors = ["Griseld Islamaj"]
 edition = "2024"
@@ -41,6 +41,13 @@ tauri-plugin-global-shortcut = "2.4.1"
 base64 = "0.23.1"
 png = "0.18.1"
 zip = { version = "9.0.2", default-features = false, features = ["deflate"] }
+cpal = "0.18.2"
+ureq = "3.4.2"
+minisign-verify = "0.3.0"
+sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries", "static"] }
+tar = "0.4.46"
+bzip2 = "0.6.1"
+memchr = "2.8.3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

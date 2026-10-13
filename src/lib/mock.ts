@@ -110,6 +110,14 @@ const settings: Settings = {
   onboarded: new URLSearchParams(location.search).get("onboarding") === null,
   devMode: false,
   seenVersion: 2,
+  updateSource: "C:\dev\Dusty\releases",
+  autoInstall: true,
+  voiceEnabled: true,
+  voiceModel: "moonshine",
+  voiceReply: false,
+  voiceHotkey: "Ctrl+Alt+D",
+  paletteHotkey: "Ctrl+Alt+K",
+  wander: true,
   mirrors: [{ a: "D:\Photos", b: "G:\Photos" }],
 };
 
@@ -227,6 +235,16 @@ export function installMocks() {
           ];
         case "optimize_info":
           return { scheduled: true, lastRun: new Date(Date.now() - 3 * DAY * 1000).toISOString() };
+        case "voice_status":
+          return {
+            model: "moonshine", installed: true, sizeMb: 103, downloading: false, listening: false, hasMic: true,
+            models: [
+              { id: "moonshine", name: "Moonshine (fast, English)", sizeMb: 103, languages: "English", installed: true },
+              { id: "parakeet", name: "Parakeet v3 (25 languages)", sizeMb: 640, languages: "English, Italian, Spanish, French, German and 20 more", installed: false },
+            ],
+          };
+        case "check_update":
+          return { current: "0.3.0", available: null, notes: "", date: "", source: "C:\dev\Dusty\releases" };
         case "app_info":
           return { version: "0.2.0", dataDir: "C:\\Users\\you\\AppData\\Local\\com.griz.dusty", debug: true };
         case "search":

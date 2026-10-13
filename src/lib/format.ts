@@ -91,9 +91,9 @@ export function parent(p: string): string {
 export function greeting(): string {
   const h = new Date().getHours();
   if (h < 5) return "Up late?";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
+  if (h < 12) return "Good morning.";
+  if (h < 18) return "Good afternoon.";
+  return "Good evening.";
 }
 
 export function plural(n: number, one: string, many = one + "s"): string {

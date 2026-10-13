@@ -123,7 +123,7 @@
             {:else}<span class="faint small">Optional.</span>{/each}
           </div>
         {:else if step === 3}
-          <h1>Find anything, instantly</h1>
+          <h1>Dusty at your fingertips</h1>
           <p class="muted">
             I index all your drives in the background, so you can search everything from anywhere. Just ask like you'd ask a friend:
             <i>“that pdf with invoice from about 5 months ago”</i>.
@@ -135,6 +135,10 @@
               <span class="faint">{hotkeyTried ? "That's the one! (It works everywhere once we're done.)" : "Try it now: you'll use it a lot."}</span>
             </div>
             {#if hotkeyTried}<Check size={20} class="okc" />{/if}
+          </div>
+          <div class="keys">
+            <div><span class="kbd">{s.paletteHotkey}</span><span>Commands: clean, pause, open… without opening Dusty</span></div>
+            <div><span class="kbd">{s.voiceHotkey}</span><span>Ask out loud (turn on voice in Settings; runs 100% on your PC)</span></div>
           </div>
           <div class="srow"><div><b>Index my drives</b><span class="faint">Takes a minute in the background, ~100 MB of memory.</span></div><Toggle bind:checked={s.indexEnabled} /></div>
         {:else}
@@ -354,6 +358,22 @@
   }
   .hotkey :global(.okc) {
     color: var(--ok);
+  }
+  .keys {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .keys div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .keys .kbd {
+    min-width: 110px;
+    justify-content: center;
   }
   .srow {
     display: flex;

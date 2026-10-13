@@ -24,12 +24,16 @@
     Bug,
     ExternalLink,
     Copy,
+    Mic,
+    Footprints,
+    RefreshCw,
   } from "@lucide/svelte";
   import Segmented from "$lib/components/Segmented.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import Mascot from "$lib/components/Mascot.svelte";
   import { app } from "$lib/app.svelte";
-  import { api, type AppInfo, type Kind, type Mode, type PolicyMode, type Protected, type Settings } from "$lib/api";
+  import { api, type AppInfo, type Kind, type Mode, type PolicyMode, type Protected, type Settings, type UpdateInfo, type VoiceStatus } from "$lib/api";
+  import { listen } from "@tauri-apps/api/event";
   import { KINDS, KIND_ORDER } from "$lib/kinds";
   import { ago, shortPath } from "$lib/format";
   import { CONFIG } from "$lib/config";
@@ -40,7 +44,13 @@
   let protectedList = $state<Protected[]>([]);
   let taps = $state(0);
   let devOut = $state("");
-  let recording = $state(false);
+  type HotkeyField = "searchHotkey" | "paletteHotkey" | "voiceHotkey";
+  let recording = $state<HotkeyField | null>(null);
+  let voice = $state<VoiceStatus | null>(null);
+  let voiceProgress = $state<number | null>(null);
+  let update = $state<UpdateInfo | null>(null);
+  let updateError = $state("");
+  let checking = $state(false);
 
   const s = $derived(app.settings!);
   let saveTimer: ReturnType<typeof setTimeout>;
@@ -48,7 +58,38 @@
   onMount(async () => {
     info = await api.appInfo();
     protectedList = await api.protectedList();
+    voice = await api.voiceStatus().catch(() => null);
+    await listen<number>("voice-download", (e) => (voiceProgress = e.payload));
   });
+
+  async function downloadVoice(model: string) {
+    voiceProgress = 0;
+    try {
+      await api.voiceDownload(model);
+      patch({ voiceModel: model, voiceEnabled: true });
+      app.toast("Voice is ready. Press " + s.voiceHotkey + " anywhere and ask.", { tone: "ok" });
+    } catch (e) {
+      app.toast(String(e), { tone: "error" });
+    } finally {
+      voiceProgress = null;
+      voice = await api.voiceStatus().catch(() => voice);
+    }
+  }
+  async function checkUpdate() {
+    checking = true;
+    updateError = "";
+    try {
+      update = await api.checkUpdate();
+    } catch (e) {
+      updateError = String(e);
+    } finally {
+      checking = false;
+    }
+  }
+  async function pickUpdateFolder() {
+    const p = await api.pickFolder();
+    if (p) patch({ updateSource: p });
+  }
 
   function patch(p: Partial<Settings>) {
     const next = { ...s, ...p } as Settings;
@@ -131,8 +172,9 @@
     const mods = [e.ctrlKey && "Ctrl", e.altKey && "Alt", e.shiftKey && "Shift", e.metaKey && "Super"].filter(Boolean);
     if (!mods.length) return;
     const key = e.code === "Space" ? "Space" : e.key.length === 1 ? e.key.toUpperCase() : e.code.replace(/^Key|^Digit/, "");
-    recording = false;
-    patch({ searchHotkey: [...mods, key].join("+") });
+    const field = recording;
+    recording = null;
+    patch({ [field]: [...mods, key].join("+") } as Partial<Settings>);
   }
 
   function tapVersion() {
@@ -398,13 +440,54 @@
 
           <h2><Search size={17} /> Search & index</h2>
           <div class="card settings">
-            <div class="srow">
-              <div><b>Search shortcut</b><span class="faint">Opens the search bar from anywhere in Windows.</span></div>
-              <span></span>
-              <button class="btn sm hotkey" class:rec={recording} onclick={() => (recording = !recording)}>{recording ? "Press keys…" : s.searchHotkey || "None"}</button>
-            </div>
+            {#each [
+              { field: "searchHotkey", title: "Search shortcut", blurb: "Opens the search bar from anywhere in Windows." },
+              { field: "paletteHotkey", title: "Command shortcut", blurb: "Dusty's command palette, from anywhere: clean, pause, open views…" },
+              { field: "voiceHotkey", title: "Voice shortcut", blurb: "Ask for a file out loud (when voice is on)." },
+            ] as h (h.field)}
+              {@const f = h.field as HotkeyField}
+              <div class="srow">
+                <div><b>{h.title}</b><span class="faint">{h.blurb}</span></div>
+                <span></span>
+                <button class="btn sm hotkey" class:rec={recording === f} onclick={() => (recording = recording === f ? null : f)}>{recording === f ? "Press keys…" : s[f] || "None"}</button>
+              </div>
+            {/each}
             <div class="srow"><div><b>Index my drives</b><span class="faint">{app.index?.ready ? `${app.index.entries.toLocaleString()} files, ~${app.index.memoryMb} MB of memory, built in ${(app.index.buildMs / 1000).toFixed(0)} s, ${ago(app.index.builtAt)}.` : "Makes search and Space instant."}</span></div><span></span><Toggle checked={s.indexEnabled} onchange={(v) => patch({ indexEnabled: v })} /></div>
             <div class="srow"><div><b>Rebuild the index now</b><span class="faint">It refreshes itself every 12 hours at idle and follows changes live in between.</span></div><span></span><button class="btn sm" disabled={app.index?.building} onclick={() => api.indexRebuild()}><Database size={13} /> {app.index?.building ? `Indexing… ${app.index.progress.toLocaleString()}` : "Rebuild"}</button></div>
+          </div>
+
+          <h2><Mic size={17} /> Voice</h2>
+          <p class="faint hint">Ask for files out loud. Speech is turned into text <b>on this PC</b> by a small open model; no audio or words ever leave your computer. Dusty only searches, it never takes actions by voice.</p>
+          <div class="card settings">
+            <div class="srow">
+              <div><b>Voice search</b><span class="faint">{voice?.hasMic === false ? "No microphone found." : `Press ${s.voiceHotkey} anywhere, or the mic in the search bar.`}</span></div>
+              <span></span>
+              <Toggle checked={s.voiceEnabled} onchange={(v) => (v && !voice?.models.find((m) => m.id === s.voiceModel)?.installed ? downloadVoice(s.voiceModel) : patch({ voiceEnabled: v }))} />
+            </div>
+            {#each voice?.models ?? [] as m (m.id)}
+              <div class="srow">
+                <div><b>{m.name}</b><span class="faint">{m.languages} · {m.sizeMb} MB{m.installed ? " · downloaded" : ""}</span></div>
+                <span>
+                  {#if voiceProgress !== null && s.voiceModel === m.id}
+                    <span class="bar"><i style="width:{Math.round(voiceProgress * 100)}%"></i></span>
+                  {/if}
+                </span>
+                {#if s.voiceModel === m.id && m.installed}
+                  <span class="chip on">In use</span>
+                {:else if m.installed}
+                  <button class="btn sm" onclick={() => patch({ voiceModel: m.id })}>Use</button>
+                {:else}
+                  <button class="btn sm" disabled={voiceProgress !== null} onclick={() => { patch({ voiceModel: m.id }); downloadVoice(m.id); }}>Download</button>
+                {/if}
+              </div>
+            {/each}
+            <div class="srow"><div><b>Answer out loud</b><span class="faint">A short spoken summary of what I found, with Windows' local voices. Off by default.</span></div><span></span><Toggle checked={s.voiceReply} onchange={(v) => patch({ voiceReply: v })} /></div>
+          </div>
+
+          <h2><Footprints size={17} /> Dusty's presence</h2>
+          <div class="card settings">
+            <div class="srow"><div><b>Let Dusty wander</b><span class="faint">Every few hours, a tiny Dusty strolls along the bottom of your screen with a broom and a thought. Click-through, never in games or presentations.</span></div><span></span><Toggle checked={s.wander} onchange={(v) => patch({ wander: v })} /></div>
+            <div class="srow"><div><b>Say hi now</b><span class="faint">See what it looks like.</span></div><span></span><button class="btn sm" onclick={() => api.buddyTest()}>Wave 👋</button></div>
           </div>
 
           <h2><Brain size={17} /> Smarts</h2>
@@ -443,7 +526,30 @@
               </button>
               <button class="btn lg" onclick={() => api.openFile(CONFIG.repoUrl)}><Code size={16} /> Source code <ExternalLink size={13} /></button>
             </div>
-            <p class="faint small credits">Built with Rust, Tauri and Svelte. Icons by Lucide.</p>
+            <div class="card updates">
+              <div class="uh">
+                <b><RefreshCw size={15} /> Updates</b>
+                {#if update?.available}
+                  <span class="chip on">Dusty {update.available} is ready</span>
+                {:else if update}
+                  <span class="faint">You're up to date</span>
+                {/if}
+              </div>
+              {#if update?.notes && update.available}<p class="muted small">{update.notes}</p>{/if}
+              {#if updateError}<p class="err small">{updateError}</p>{/if}
+              <div class="row">
+                <button class="btn sm" disabled={checking} onclick={checkUpdate}>{checking ? "Checking…" : "Check now"}</button>
+                {#if update?.available}<button class="btn sm primary" onclick={() => api.installUpdate(false)}>Update & restart</button>{/if}
+              </div>
+              <div class="srow tight"><div><b>Install updates by myself</b><span class="faint">While you're away; Dusty restarts in a few seconds. Updates are signature-checked first.</span></div><span></span><Toggle checked={s.autoInstall} onchange={(v) => patch({ autoInstall: v })} /></div>
+              <div class="srow tight">
+                <div><b>Update source</b><span class="faint mono ellipsis">{s.updateSource}</span></div>
+                <span></span>
+                <button class="btn sm ghost" onclick={pickUpdateFolder}>Folder…</button>
+              </div>
+              <input class="src" placeholder="…or a URL to latest.json" value={s.updateSource.startsWith("http") ? s.updateSource : ""} onchange={(e) => e.currentTarget.value && patch({ updateSource: e.currentTarget.value })} />
+            </div>
+            <p class="faint small credits">Private by design: everything runs on this PC, nothing is uploaded, no telemetry. Open source. Built with Rust, Tauri and Svelte.</p>
           </div>
         {:else if tab === "dev"}
           <p class="muted lead"><Bug size={15} /> Developer tools. Poke things without waiting for Dusty's schedule.</p>
@@ -812,6 +918,63 @@
     background: linear-gradient(135deg, #ffcf6e, #ff8f5a);
     color: #2a1606;
     box-shadow: 0 8px 24px -8px rgba(255, 143, 90, 0.7);
+  }
+  .updates {
+    width: min(560px, 100%);
+    margin-top: 18px;
+    padding: 14px 18px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .updates .uh {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .updates .uh b {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .updates .row {
+    display: flex;
+    gap: 8px;
+  }
+  .srow.tight {
+    padding: 8px 0;
+  }
+  .src {
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 9px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    outline: none;
+  }
+  .err {
+    color: var(--danger);
+    margin: 0;
+  }
+  .chip.on {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    background: var(--accent-soft);
+  }
+  .bar {
+    display: block;
+    height: 4px;
+    border-radius: 4px;
+    background: var(--surface-3);
+    overflow: hidden;
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--grad);
+    transition: width 0.2s;
   }
   .credits {
     margin-top: 10px;

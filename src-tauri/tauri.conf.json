@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Dusty",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "identifier": "com.griz.dusty",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -35,7 +35,47 @@
         "title": "Dusty Search",
         "url": "/search",
         "width": 760,
-        "height": 520,
+        "height": 160,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "visible": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true,
+        "focus": true,
+        "windowEffects": {
+          "effects": [
+            "acrylic"
+          ]
+        }
+      },
+      {
+        "label": "traymenu",
+        "title": "Dusty menu",
+        "url": "/traymenu",
+        "width": 290,
+        "height": 420,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "visible": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "windowEffects": {
+          "effects": [
+            "acrylic"
+          ]
+        }
+      },
+      {
+        "label": "buddy",
+        "title": "Dusty",
+        "url": "/buddy",
+        "width": 800,
+        "height": 190,
         "decorations": false,
         "transparent": true,
         "shadow": false,
@@ -43,8 +83,7 @@
         "resizable": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "center": true,
-        "focus": true
+        "focus": false
       }
     ],
     "security": {
@@ -75,6 +114,13 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCRTZCRDk4MEI2MDA4NkQKUldSdENHQUxtTDNtUzF5YlNVN1h1bTlLYzEvQU5Ybk52NWFZS1lMbTJBbnVCU0J6ZkJsT3U2czYK",
+      "endpoints": []
     }
   }
 }

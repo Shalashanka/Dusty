@@ -65,6 +65,12 @@
   let startX = 0;
   let startY = 0;
   let busy = false;
+  let puffs = $state<number[]>([]);
+  function puff() {
+    const id = Date.now();
+    puffs = [...puffs, id];
+    setTimeout(() => (puffs = puffs.filter((p) => p !== id)), 900);
+  }
 
   function flyAway(_node: Element) {
     const dir = exitDir;
@@ -87,6 +93,7 @@
     }
     busy = true;
     exitDir = action === "keep" ? 1 : action === "snooze" ? 0 : -1;
+    if (exitDir === -1) puff();
     const out = await app.act([f], action, true);
     dx = 0;
     dy = 0;
@@ -300,6 +307,11 @@
   {:else if mode === "cards"}
     <div class="stage">
       <div class="stack">
+        {#each puffs as p (p)}
+          <div class="puff" aria-hidden="true">
+            {#each Array(10) as _, k}<i style="--a:{k * 36}deg;--d:{60 + (k % 3) * 25}px"></i>{/each}
+          </div>
+        {/each}
         {#each list.slice(0, 3).reverse() as f, ri (f.id)}
           {@const i = Math.min(list.length, 3) - 1 - ri}
           <div
@@ -490,6 +502,31 @@
     max-height: 560px;
     min-height: 380px;
     margin-top: 6px;
+  }
+  .puff {
+    position: absolute;
+    left: 18%;
+    top: 45%;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .puff i {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(215, 207, 255, 0.85), rgba(215, 207, 255, 0));
+    animation: burst 0.85s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  }
+  @keyframes burst {
+    from {
+      transform: rotate(var(--a)) translateX(0) scale(0.6);
+      opacity: 1;
+    }
+    to {
+      transform: rotate(var(--a)) translateX(var(--d)) scale(2);
+      opacity: 0;
+    }
   }
   .slot {
     position: absolute;

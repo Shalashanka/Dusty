@@ -61,6 +61,8 @@ class AppStore {
   mirrorPair = $state<{ a: string; b: string } | null>(null);
   /** Bytes freed since the window was opened, for the triage counter. */
   sessionFreed = $state(0);
+  /** Version string when a newer Dusty is waiting. */
+  updateAvailable = $state<string | null>(null);
 
   allFindings = $derived(this.snap?.findings ?? []);
   findings = $derived(
@@ -101,6 +103,8 @@ class AppStore {
     await listen<string>("phase", (e) => (this.phase = e.payload));
     await listen<string>("navigate", (e) => this.go(e.payload as View));
     await listen<IndexStatus>("index", (e) => (this.index = e.payload));
+    await listen<string>("update-available", (e) => (this.updateAvailable = e.payload));
+    api.checkUpdate().then((u) => (this.updateAvailable = u.available)).catch(() => {});
     // Keep relative times and free space fresh.
     setInterval(() => {
       this.refresh();

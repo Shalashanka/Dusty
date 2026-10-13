@@ -64,9 +64,85 @@ pub struct Index {
     pub roots: Vec<(u32, String)>,
     pub built_at: i64,
     pub build_ms: u64,
+    /// Lowercased, accent-folded copy of every name (built on first search),
+    /// with each entry's start offset, for SIMD substring scans.
+    folded: std::sync::OnceLock<(Vec<u8>, Vec<u32>)>,
 }
 
 impl Index {
+    fn folded(&self) -> &(Vec<u8>, Vec<u32>) {
+        self.folded.get_or_init(|| {
+            let mut text = Vec::with_capacity(self.names.len());
+            let mut offs = Vec::with_capacity(self.entries.len() + 1);
+            for i in 0..self.entries.len() as u32 {
+                offs.push(text.len() as u32);
+                let n = self.name(i);
+                if n.is_ascii() {
+                    text.extend(n.bytes().map(|b| b.to_ascii_lowercase()));
+                } else {
+                    text.extend(crate::nlq::fold(n).bytes());
+                }
+                // Separator so a match can never span two names.
+                text.push(0);
+            }
+            offs.push(text.len() as u32);
+            (text, offs)
+        })
+    }
+
+    /// For each entry, which of `alts` groups occur in its name (bitmask).
+    /// Scans the folded arena with SIMD substring search, in parallel chunks.
+    pub fn warm(&self) {
+        let _ = self.folded();
+    }
+
+    /// `primary[k]` is the typed term; short synonyms must match whole words
+    /// ("trip" shouldn't hit "stripes").
+    pub fn name_masks(&self, alts: &[Vec<String>], primary: &[String]) -> Vec<u32> {
+        let (text, offs) = self.folded();
+        let n = self.entries.len();
+        let mut masks = vec![0u32; n];
+        if alts.is_empty() || n == 0 {
+            return masks;
+        }
+        let finders: Vec<(u32, bool, memchr::memmem::Finder)> = alts
+            .iter()
+            .enumerate()
+            .take(32)
+            .flat_map(|(k, group)| {
+                let p = primary.get(k).cloned().unwrap_or_default();
+                group.iter().filter(|a| !a.is_empty()).map(move |a| {
+                    let whole_word = a.len() <= 4 && *a != p;
+                    (1u32 << k, whole_word, memchr::memmem::Finder::new(a.as_bytes()).into_owned())
+                })
+            })
+            .collect();
+        let chunk = n.div_ceil(rayon::current_num_threads().max(1) * 4).max(1);
+        masks.par_chunks_mut(chunk).enumerate().for_each(|(c, out)| {
+            let first = c * chunk;
+            let lo = offs[first] as usize;
+            let hi = offs[first + out.len()] as usize;
+            let slice = &text[lo..hi];
+            for (bit, whole_word, f) in &finders {
+                let len = f.needle().len();
+                for pos in f.find_iter(slice) {
+                    if *whole_word {
+                        let before = if pos == 0 { 0 } else { slice[pos - 1] };
+                        let after = slice.get(pos + len).copied().unwrap_or(0);
+                        if before.is_ascii_alphanumeric() || after.is_ascii_alphanumeric() {
+                            continue;
+                        }
+                    }
+                    let abs = (lo + pos) as u32;
+                    // Entry containing this byte: last start <= abs.
+                    let j = offs[first..first + out.len() + 1].partition_point(|&o| o <= abs) - 1;
+                    out[j] |= bit;
+                }
+            }
+        });
+        masks
+    }
+
     pub fn name(&self, i: u32) -> &str {
         let e = &self.entries[i as usize];
         &self.names[e.name_off as usize..e.name_off as usize + e.name_len as usize]
@@ -380,6 +456,21 @@ pub struct IndexState {
     pub rebuild: AtomicBool,
     pub progress: AtomicU64,
     watchers: Mutex<Vec<notify::RecommendedWatcher>>,
+    /// Live corrections between rebuilds (deleted entries, shrunken folders).
+    pub adjust: RwLock<Adjust>,
+    pending_removed: Mutex<Vec<String>>,
+}
+
+#[derive(Default)]
+pub struct Adjust {
+    pub dead: HashSet<u32>,
+    pub shrink: HashMap<u32, u64>,
+}
+
+impl Adjust {
+    pub fn size(&self, idx: &Index, i: u32) -> u64 {
+        idx.entries[i as usize].size.saturating_sub(self.shrink.get(&i).copied().unwrap_or(0))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -424,9 +515,56 @@ impl IndexState {
     }
 
     pub fn install(&self, idx: Index) {
-        *self.idx.write() = Some(Arc::new(idx));
+        let idx = Arc::new(idx);
+        // Prepare the search arena in the background so the first query is instant.
+        let warm = idx.clone();
+        std::thread::spawn(move || warm.warm());
+        *self.idx.write() = Some(idx);
         self.added.lock().clear();
         self.removed.lock().clear();
+        *self.adjust.write() = Adjust::default();
+        self.pending_removed.lock().clear();
+    }
+
+    /// Applies queued deletions to the live size corrections (every few seconds).
+    /// Returns true when there were so many that a rebuild is the better option.
+    pub fn apply_removals(&self) -> bool {
+        let mut batch = std::mem::take(&mut *self.pending_removed.lock());
+        if batch.is_empty() {
+            return false;
+        }
+        let Some(idx) = self.get() else { return false };
+        // Only the topmost removed paths matter (a deleted folder covers its files).
+        batch.sort_by_key(|p| p.len());
+        let mut tops: Vec<String> = Vec::new();
+        for p in batch {
+            let low = p.to_lowercase();
+            if !tops.iter().any(|t| low == *t || low.starts_with(&format!("{t}\\"))) {
+                tops.push(low);
+            }
+        }
+        if tops.len() > 300 {
+            return true;
+        }
+        for p in tops {
+            // Came back (rename round-trip, recreated file)?
+            if Path::new(&p).exists() {
+                continue;
+            }
+            let Some(i) = idx.lookup(&p) else { continue };
+            let mut adj = self.adjust.write();
+            if adj.dead.contains(&i) {
+                continue;
+            }
+            let lost = adj.size(&idx, i);
+            adj.dead.insert(i);
+            let mut cur = idx.entries[i as usize].parent;
+            while cur != NONE {
+                *adj.shrink.entry(cur).or_default() += lost;
+                cur = idx.entries[cur as usize].parent;
+            }
+        }
+        false
     }
 
     pub fn clear(&self) {
@@ -457,9 +595,12 @@ impl IndexState {
                         notify::event::RenameMode::From,
                     )) => {
                         for p in &ev.paths {
-                            me2.removed
-                                .lock()
-                                .insert(p.to_string_lossy().to_lowercase());
+                            let s = p.to_string_lossy().into_owned();
+                            me2.removed.lock().insert(s.to_lowercase());
+                            let mut pend = me2.pending_removed.lock();
+                            if pend.len() < 100_000 {
+                                pend.push(s);
+                            }
                         }
                     }
                     _ => {}
@@ -540,46 +681,95 @@ pub struct Hit {
 }
 
 fn search_index(idx: &Index, q: &Query, limit: usize, removed: &HashSet<String>) -> Vec<Hit> {
-    // Cheap name/size/time filter in parallel, then paths only for candidates.
-    let mut cands: Vec<(u32, f32)> = idx
+    let hits = search_pass(idx, q, limit, removed);
+    if !hits.is_empty() || q.alts.is_empty() {
+        return hits;
+    }
+    // Nothing at all: forgive typos ("invocie", "screnshot") and try again.
+    let mut fuzzy = q.clone();
+    for (k, t) in q.terms.iter().enumerate() {
+        if let Some(alts) = fuzzy.alts.get_mut(k) {
+            alts.extend(crate::nlq::typo_variants(&crate::nlq::fold(t)));
+        }
+    }
+    search_pass(idx, &fuzzy, limit, removed)
+}
+
+/// One ranking pass:
+/// 1. folders whose name matches a term get a bitmask of matched terms;
+/// 2. a forward sweep hands every entry the union of its ancestors' masks
+///    (parents precede children in the arena, so this is linear);
+/// 3. entries are ranked by how many terms they cover (name or folders),
+///    then by name quality, recency and location.
+fn search_pass(idx: &Index, q: &Query, limit: usize, removed: &HashSet<String>) -> Vec<Hit> {
+    let n_terms = q.alts.len().min(32);
+    let full: u32 = if n_terms == 32 { u32::MAX } else { (1u32 << n_terms) - 1 };
+
+    // Per-entry name masks, computed once in parallel.
+    let name_masks: Vec<u32> = if n_terms == 0 { Vec::new() } else { idx.name_masks(&q.alts, &q.primary) };
+    // Inherited masks from matching folders above each entry.
+    let mut inherited: Vec<u32> = Vec::new();
+    if n_terms > 0 {
+        inherited = vec![0u32; idx.entries.len()];
+        for (i, e) in idx.entries.iter().enumerate() {
+            if e.parent != NONE {
+                let p = e.parent as usize;
+                let from_parent = inherited[p] | if idx.entries[p].is_dir() { name_masks[p] } else { 0 };
+                inherited[i] = from_parent;
+            }
+        }
+    }
+
+    let mut cands: Vec<(u32, u32, f32)> = idx
         .entries
         .par_iter()
         .enumerate()
         .filter_map(|(i, e)| {
-            let i = i as u32;
-            if e.parent == NONE {
+            if e.parent == NONE || !q.passes(idx.name(i as u32), e.is_dir(), e.size, e.mtime()) {
                 return None;
             }
-            q.prefilter(idx.name(i), e.is_dir(), e.size, e.mtime())
-                .map(|s| (i, s))
+            let (nm, cover) = if n_terms > 0 {
+                let nm = name_masks[i];
+                (nm, (nm | inherited[i]) & full)
+            } else {
+                (0, 0)
+            };
+            if n_terms > 0 && cover == 0 {
+                return None;
+            }
+            let name = idx.name(i as u32);
+            let mut score = cover.count_ones() as f32 * 40.0 + q.name_score(name, nm) + q.recency(e.mtime());
+            // A term found only in a folder name counts, but less than in the file name.
+            score -= ((cover & !nm).count_ones() as f32) * 6.0;
+            score -= (name.len() as f32 / 40.0).min(4.0);
+            if e.is_dir() {
+                score += 1.0;
+            }
+            Some((i as u32, cover.count_ones(), score))
         })
         .collect();
-    cands.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if cands.is_empty() {
+        return Vec::new();
+    }
+    // Keep the best-covered results; with many terms allow one miss.
+    let best = cands.iter().map(|c| c.1).max().unwrap_or(0);
+    let floor = if n_terms >= 3 { best.saturating_sub(1).max(1) } else { best };
+    cands.retain(|c| c.1 >= floor);
+    cands.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
     cands.truncate(20_000);
     let mut hits: Vec<Hit> = cands
         .par_iter()
-        .filter_map(|&(i, base)| {
+        .filter_map(|&(i, _, base)| {
             let path = idx.path(i);
             let e = &idx.entries[i as usize];
             let score = q.path_score(&path, base)?;
             if removed.contains(&path.to_lowercase()) {
                 return None;
             }
-            Some(Hit {
-                name: idx.name(i).to_string(),
-                is_dir: e.is_dir(),
-                size: e.size,
-                mtime: e.mtime(),
-                score,
-                path,
-            })
+            Some(Hit { name: idx.name(i).to_string(), is_dir: e.is_dir(), size: e.size, mtime: e.mtime(), score, path })
         })
         .collect();
-    hits.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     hits.truncate(limit);
     hits
 }
@@ -600,8 +790,12 @@ pub struct TreeNode {
 }
 
 /// Nested sizes under `path`, `depth` levels deep, small items folded.
-pub fn tree(idx: &Index, path: &str, depth: usize) -> Option<TreeNode> {
+/// `adj` hides what was deleted since the index was built.
+pub fn tree(idx: &Index, path: &str, depth: usize, adj: &Adjust) -> Option<TreeNode> {
     let root = idx.lookup(path)?;
+    if adj.dead.contains(&root) {
+        return None;
+    }
     let mut levels: Vec<HashMap<u32, Vec<u32>>> = Vec::new();
     let mut frontier: HashSet<u32> = [root].into_iter().collect();
     for _ in 0..depth {
@@ -610,7 +804,7 @@ pub fn tree(idx: &Index, path: &str, depth: usize) -> Option<TreeNode> {
             .values()
             .flatten()
             .copied()
-            .filter(|&k| idx.entries[k as usize].is_dir() && idx.entries[k as usize].size > 0)
+            .filter(|&k| idx.entries[k as usize].is_dir() && !adj.dead.contains(&k) && adj.size(idx, k) > 0)
             .collect();
         levels.push(kids);
         if frontier.is_empty() {
@@ -618,32 +812,27 @@ pub fn tree(idx: &Index, path: &str, depth: usize) -> Option<TreeNode> {
         }
     }
     let limits = [60usize, 16, 8, 5];
-    fn node(
-        idx: &Index,
-        i: u32,
-        level: usize,
-        levels: &[HashMap<u32, Vec<u32>>],
-        limits: &[usize],
-    ) -> TreeNode {
+    fn node(idx: &Index, i: u32, level: usize, levels: &[HashMap<u32, Vec<u32>>], limits: &[usize], adj: &Adjust) -> TreeNode {
         let e = idx.entries[i as usize];
+        let size = adj.size(idx, i);
         let mut children = Vec::new();
         if level < levels.len()
             && let Some(kids) = levels[level].get(&i)
         {
-            let mut kids = kids.clone();
-            kids.sort_by_key(|k| std::cmp::Reverse(idx.entries[*k as usize].size));
+            let mut kids: Vec<u32> = kids.iter().copied().filter(|k| !adj.dead.contains(k)).collect();
+            kids.sort_by_key(|k| std::cmp::Reverse(adj.size(idx, *k)));
             let lim = limits.get(level).copied().unwrap_or(6);
-            let total = e.size.max(1);
+            let total = size.max(1);
             let mut shown = 0;
             let mut rest_bytes = 0u64;
             let mut rest_n = 0u64;
             for k in kids {
-                let ke = &idx.entries[k as usize];
-                if shown < lim && (shown < 3 || ke.size * 250 >= total) {
-                    children.push(node(idx, k, level + 1, levels, limits));
+                let ks = adj.size(idx, k);
+                if shown < lim && (shown < 3 || ks * 250 >= total) {
+                    children.push(node(idx, k, level + 1, levels, limits, adj));
                     shown += 1;
                 } else {
-                    rest_bytes += ke.size;
+                    rest_bytes += ks;
                     rest_n += 1;
                 }
             }
@@ -662,14 +851,14 @@ pub fn tree(idx: &Index, path: &str, depth: usize) -> Option<TreeNode> {
         TreeNode {
             name: idx.name(i).to_string(),
             path: idx.path(i),
-            bytes: e.size,
+            bytes: size,
             files: 0,
             is_dir: e.is_dir(),
             newest: e.mtime(),
             children,
         }
     }
-    Some(node(idx, root, 0, &levels, &limits))
+    Some(node(idx, root, 0, &levels, &limits, adj))
 }
 
 #[cfg(test)]
@@ -701,7 +890,7 @@ mod tests {
         assert_eq!(back.entries.len(), idx.entries.len());
         assert_eq!(back.name(i), "hello invoice.pdf");
 
-        let t = tree(&back, &root, 2).unwrap();
+        let t = tree(&back, &root, 2, &Adjust::default()).unwrap();
         assert_eq!(t.children[0].name, "a");
         assert_eq!(t.children[0].bytes, 3005);
 
@@ -709,6 +898,14 @@ mod tests {
         st.install(back);
         let hits = st.search(&crate::nlq::parse("invoice pdf"), 10);
         assert_eq!(hits.len(), 1);
+
+        // Deleting a folder updates Space without a rebuild.
+        fs::remove_dir_all(d.join("a").join("b")).unwrap();
+        st.pending_removed.lock().push(format!(r"{root}\a\b"));
+        assert!(!st.apply_removals());
+        let t = tree(&st.get().unwrap(), &root, 2, &st.adjust.read()).unwrap();
+        assert_eq!(t.bytes, 5, "only x.txt is left");
+        assert!(t.children[0].children.iter().all(|c| c.name != "b"));
         fs::remove_dir_all(&d).unwrap();
     }
 
@@ -754,12 +951,43 @@ mod tests {
         }
         let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
         let t = std::time::Instant::now();
-        let tr = tree(&st.get().unwrap(), &home, 3).unwrap();
+        let tr = tree(&st.get().unwrap(), &home, 3, &Adjust::default()).unwrap();
         eprintln!(
             "tree(home) in {} ms: {} top children",
             t.elapsed().as_millis(),
             tr.children.len()
         );
         let _ = fs::remove_file(f);
+    }
+
+    /// Read-only, uses the saved index: `cargo test --release real_search -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_search() {
+        let f = dirs::data_local_dir().unwrap().join("com.griz.dusty").join("index.bin");
+        let st = IndexState::default();
+        st.install(load(&f).expect("run Dusty once to build the index"));
+        for q in [
+            "invoice",
+            "invocie pdf",
+            "find the invoice pdf I downloaded about five months ago",
+            "show me big videos on the D drive",
+            "dusty mascot svg",
+            "fije results hdr tif",
+            "foto vacanze",
+            "old zip files in downloads",
+            "screenshots last week",
+            "cargo toml dusty",
+        ] {
+            let t = std::time::Instant::now();
+            let parsed = crate::nlq::parse(q);
+            let hits = st.search(&parsed, 4);
+            eprintln!(
+                "{q:?} {:?} -> {} ms: {:?}",
+                parsed.explain,
+                t.elapsed().as_millis(),
+                hits.iter().map(|h| h.path.clone()).collect::<Vec<_>>()
+            );
+        }
     }
 }

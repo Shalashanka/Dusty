@@ -113,6 +113,18 @@ pub struct Settings {
     pub dev_mode: bool,
     /// Folder pairs that are backups of each other: never compared or flagged.
     pub mirrors: Vec<Mirror>,
+    /// Folder or URL with latest.json + signed installers.
+    pub update_source: String,
+    /// Install updates on my own when you're away (otherwise just ask).
+    pub auto_install: bool,
+    pub voice_enabled: bool,
+    pub voice_model: String,
+    /// Read answers out loud (off by default).
+    pub voice_reply: bool,
+    pub voice_hotkey: String,
+    pub palette_hotkey: String,
+    /// Dusty sometimes strolls along the bottom of the screen while working.
+    pub wander: bool,
 }
 
 fn s(p: Option<PathBuf>) -> Option<String> {
@@ -260,6 +272,14 @@ impl Default for Settings {
             seen_version: 0,
             dev_mode: false,
             mirrors: Vec::new(),
+            update_source: crate::updater::DEFAULT_SOURCE.into(),
+            auto_install: true,
+            voice_enabled: false,
+            voice_model: "moonshine".into(),
+            voice_reply: false,
+            voice_hotkey: "Ctrl+Alt+D".into(),
+            palette_hotkey: "Ctrl+Alt+K".into(),
+            wander: true,
         }
     }
 }

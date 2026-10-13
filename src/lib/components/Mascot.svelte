@@ -5,12 +5,41 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
-  let { mood = "idle", size = 160 }: { mood?: Mood; size?: number } = $props();
+  let {
+    mood: baseMood = "idle",
+    size = 160,
+    interactive = true,
+    lively = true,
+  }: { mood?: Mood; size?: number; interactive?: boolean; lively?: boolean } = $props();
 
   let el: SVGSVGElement;
   let look = $state({ x: 0, y: 0 });
   let blink = $state(false);
+  /** Short-lived reactions (petting, idle fidgets) take over the mood briefly. */
+  let override = $state<Mood | null>(null);
+  let glance = $state<{ x: number; y: number } | null>(null);
+  let hop = $state(false);
+  let hearts = $state<{ id: number; x: number; d: number }[]>([]);
+  const mood = $derived(override ?? baseMood);
   const uid = Math.random().toString(36).slice(2, 8);
+  let overrideTimer: ReturnType<typeof setTimeout>;
+
+  function react(m: Mood, ms: number) {
+    clearTimeout(overrideTimer);
+    override = m;
+    overrideTimer = setTimeout(() => (override = null), ms);
+  }
+
+  /** Petting Dusty: a happy hop and a few hearts. */
+  function pet() {
+    if (!interactive) return;
+    react("happy", 1800);
+    hop = true;
+    setTimeout(() => (hop = false), 600);
+    const now = Date.now();
+    hearts = [...hearts, ...[0, 1, 2].map((i) => ({ id: now + i, x: 30 + Math.random() * 40, d: i * 120 }))];
+    setTimeout(() => (hearts = hearts.filter((h) => h.id < now)), 1800);
+  }
 
   onMount(() => {
     let raf = 0;
@@ -34,20 +63,51 @@
       t = setTimeout(loop, 3000 + Math.random() * 4000);
     };
     t = setTimeout(loop, 2200);
+
+    // Idle fidgets: glance around, a quick sweep, a little hop. Feels alive, never busy.
+    let f: ReturnType<typeof setTimeout>;
+    const fidget = () => {
+      if (lively && !override && (baseMood === "idle" || baseMood === "happy" || baseMood === "curious")) {
+        const r = Math.random();
+        if (r < 0.4) {
+          glance = { x: -4.5, y: 0.5 };
+          setTimeout(() => (glance = { x: 4.5, y: 0.5 }), 700);
+          setTimeout(() => (glance = null), 1500);
+        } else if (r < 0.65) {
+          react("sweeping", 2400);
+        } else if (r < 0.85) {
+          hop = true;
+          setTimeout(() => (hop = false), 600);
+        } else {
+          react("wave", 1800);
+        }
+      }
+      f = setTimeout(fidget, 9000 + Math.random() * 9000);
+    };
+    f = setTimeout(fidget, 6000 + Math.random() * 6000);
     return () => {
       window.removeEventListener("pointermove", onMove);
       clearTimeout(t);
+      clearTimeout(f);
+      clearTimeout(overrideTimer);
       cancelAnimationFrame(raf);
     };
   });
 
-  const lookX = $derived(mood === "sweeping" || mood === "sleeping" ? 0 : look.x);
-  const lookY = $derived(mood === "sweeping" ? 3 : mood === "sleeping" ? 0 : look.y);
+  const lookX = $derived(glance ? glance.x : mood === "sweeping" || mood === "sleeping" ? 0 : look.x);
+  const lookY = $derived(glance ? glance.y : mood === "sweeping" ? 3 : mood === "sleeping" ? 0 : look.y);
 </script>
 
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<span class="wrap" class:pettable={interactive} style="width:{size}px;height:{size}px" onclick={pet}>
+{#each hearts as h (h.id)}
+  <span class="heart" style="left:{h.x}%;animation-delay:{h.d}ms">♥</span>
+{/each}
 <svg
   bind:this={el}
   class="mascot {mood}"
+  class:hopping={hop}
   width={size}
   height={size}
   viewBox="0 0 200 200"
@@ -192,11 +252,53 @@
     </g>
   {/if}
 </svg>
+</span>
 
 <style>
+  .wrap {
+    position: relative;
+    display: inline-block;
+  }
+  .wrap.pettable {
+    cursor: pointer;
+  }
+  .wrap.pettable:hover .mascot {
+    filter: drop-shadow(0 0 14px rgba(157, 140, 255, 0.45));
+  }
+  .heart {
+    position: absolute;
+    top: 18%;
+    z-index: 2;
+    color: #ff7eb6;
+    font-size: 18px;
+    pointer-events: none;
+    animation: heart 1.4s ease-out both;
+  }
+  @keyframes heart {
+    0% {
+      opacity: 0;
+      transform: translateY(10px) scale(0.5);
+    }
+    20% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-46px) scale(1.2) rotate(-12deg);
+    }
+  }
+  .mascot.hopping {
+    animation: pethop 0.6s cubic-bezier(0.3, 1.6, 0.5, 1);
+  }
+  @keyframes pethop {
+    40% {
+      transform: translateY(-14px) scale(1.03, 0.97);
+    }
+  }
   .mascot {
     overflow: visible;
     display: block;
+    transition: filter 0.3s;
   }
   .eyes {
     transition: transform 0.35s var(--ease);
