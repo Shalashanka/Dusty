@@ -239,6 +239,9 @@
       { divider: true },
       ...f.actions.map((a) => ({ label: ACTIONS[a].label, icon: ACTIONS[a].icon, danger: ACTIONS[a].tone === "danger", run: () => decideList(f, a) })),
       { divider: true },
+      ...((f.kind === "duplicate" || f.kind === "similar_photo") && f.related[0]
+        ? [{ label: "These folders are backups of each other…", run: () => { app.mirrorPair = { a: f.path, b: f.related[0] }; } }]
+        : []),
       { label: "Don't touch for a month", run: () => app.protect(f.path, 30, `“${f.title}”`) },
       { label: "Never touch this", run: () => app.protect(f.path, 0, `“${f.title}”`) },
     ]);
@@ -400,7 +403,7 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 30px 32px 18px;
+    padding: 42px 32px 18px;
     position: relative;
   }
   .toolbar {

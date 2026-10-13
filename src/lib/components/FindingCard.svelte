@@ -66,6 +66,9 @@
           { label: "It's important, never touch it", icon: ShieldCheck, run: () => app.protect(folder, 0, `“${name(folder)}”`) },
         );
       }
+      if ((f.kind === "duplicate" || f.kind === "similar_photo") && f.related[0]) {
+        items.push({ divider: true }, { label: "These folders are backups of each other…", icon: Copy, run: () => { app.mirrorPair = { a: f.path, b: f.related[0] }; } });
+      }
       items.push({ divider: true }, { label: "Copy path", icon: Copy, run: () => navigator.clipboard.writeText(f.path) });
       if (!f.actions.includes("delete") && f.actions.includes("recycle")) {
         items.push({ label: "Delete for good (skip the bin)", icon: Flame, danger: true, run: () => onact("delete") });

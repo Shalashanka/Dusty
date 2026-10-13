@@ -36,6 +36,8 @@ pub struct AppState {
     pub procs: Mutex<Monitor>,
     /// True while the Speed view is open (sample processes more often).
     pub live_procs: AtomicBool,
+    /// When the current scan started (0 when idle).
+    pub scan_started: AtomicI64,
 }
 
 impl AppState {
@@ -66,6 +68,7 @@ impl AppState {
             index: Arc::new(IndexState::default()),
             procs: Mutex::new(Monitor::new()),
             live_procs: AtomicBool::new(false),
+            scan_started: AtomicI64::new(0),
         }
     }
 

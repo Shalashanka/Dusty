@@ -45,6 +45,13 @@ impl Default for FolderPolicy {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Mirror {
+    pub a: String,
+    pub b: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -101,7 +108,11 @@ pub struct Settings {
 
     pub start_with_windows: bool,
     pub onboarded: bool,
+    /// Onboarding version the user has seen (new features re-run it once).
+    pub seen_version: u32,
     pub dev_mode: bool,
+    /// Folder pairs that are backups of each other: never compared or flagged.
+    pub mirrors: Vec<Mirror>,
 }
 
 fn s(p: Option<PathBuf>) -> Option<String> {
@@ -246,7 +257,9 @@ impl Default for Settings {
             learn: true,
             start_with_windows: true,
             onboarded: false,
+            seen_version: 0,
             dev_mode: false,
+            mirrors: Vec::new(),
         }
     }
 }
@@ -278,6 +291,15 @@ impl Settings {
         } else {
             self.drives.clone()
         }
+    }
+
+    /// Inside any mirrored folder (either side)?
+    pub fn in_mirror(&self, path: &str) -> bool {
+        let low = path.to_lowercase();
+        self.mirrors.iter().flat_map(|m| [&m.a, &m.b]).any(|root| {
+            let r = root.trim_end_matches('\\').to_lowercase();
+            !r.is_empty() && (low == r || low.starts_with(&format!("{r}\\")))
+        })
     }
 
     pub fn dest_for(&self, category: &str) -> String {
@@ -313,6 +335,20 @@ mod tests {
         assert_eq!(s.stale_days, 10);
         assert_eq!(s.mode(Kind::Installer), Mode::Auto);
         assert_eq!(s.mode(Kind::Backup), Mode::Ask);
-        assert_eq!(s.dest_for("script").ends_with("Scripts"), true);
+        assert!(s.dest_for("script").ends_with("Scripts"));
+    }
+
+    #[test]
+    fn mirrors_match_both_sides() {
+        let s = Settings {
+            mirrors: vec![Mirror {
+                a: r"D:\Photos".into(),
+                b: r"G:\Backup\Photos".into(),
+            }],
+            ..Settings::default()
+        };
+        assert!(s.in_mirror(r"D:\Photos\2023\a.jpg"));
+        assert!(s.in_mirror(r"g:\backup\photos\2023\a.jpg"));
+        assert!(!s.in_mirror(r"D:\PhotosOld\a.jpg"));
     }
 }

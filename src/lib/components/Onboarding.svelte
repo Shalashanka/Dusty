@@ -4,7 +4,7 @@
   import { ArrowRight, ArrowLeft, ShieldCheck, Moon, Hand, FolderPlus, X, Check, Download, Monitor, Code, Search, Turtle, Scale, Rocket } from "@lucide/svelte";
   import Mascot, { type Mood } from "./Mascot.svelte";
   import Toggle from "./Toggle.svelte";
-  import { app } from "$lib/app.svelte";
+  import { app, ONBOARDING_VERSION } from "$lib/app.svelte";
   import { api, type Kind, type Mode, type PolicyMode, type Settings } from "$lib/api";
 
   let step = $state(0);
@@ -43,6 +43,7 @@
   async function finish() {
     applyStyle();
     s.onboarded = true;
+    s.seenVersion = ONBOARDING_VERSION;
     await app.saveSettings(s);
     await api.scanNow();
     await app.refresh();

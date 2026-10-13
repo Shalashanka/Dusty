@@ -24,6 +24,16 @@
     shownDrives.reduce((a, d) => ({ total: a.total + d.total, free: a.free + d.free }), { total: 0, free: 0 }),
   );
 
+  let tick = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (tick = Date.now()), 1000);
+    return () => clearInterval(t);
+  });
+  function elapsed(start: number) {
+    const s = Math.max(0, Math.round(tick / 1000 - start));
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  }
+
   let confirming = $state<string | null>(null);
   let confirmTimer: ReturnType<typeof setTimeout>;
   function arm(key: string): boolean {
@@ -70,6 +80,7 @@
         <h1 in:fly={{ y: 8, duration: 400, easing: cubicOut }}>
           {#if app.scanning}
             {app.phase || "Looking around"}<span class="dots"><i>.</i><i>.</i><i>.</i></span>
+            {#if app.snap?.scanStartedAt}<span class="elapsed">{elapsed(app.snap.scanStartedAt)}</span>{/if}
           {:else if app.paused}
             Napping until {clock(app.snap!.pausedUntil)}.
           {:else if app.findings.length}
@@ -227,7 +238,7 @@
 <style>
   .home {
     height: 100%;
-    padding: 34px 40px 60px;
+    padding: 42px 40px 60px;
   }
   .hero {
     display: flex;
@@ -279,6 +290,13 @@
     to {
       transform: rotate(360deg);
     }
+  }
+  .elapsed {
+    margin-left: 10px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
   }
   .dots i {
     font-style: normal;

@@ -4,6 +4,19 @@ Everything requested so far, as things to try. Tick them off as you go.
 Tip: **Settings › About › tap the version 7 times** unlocks Developer mode,
 which can fire notifications, digests and scans on demand.
 
+## Fixes in 0.2.1
+- [ ] Buttons near the top (Space drive chips, refresh, Tidy view toggles) are clickable; the fade under the title bar no longer blocks them
+- [ ] After installing, the window opens on its own (not only in the tray), even on a slow first start
+- [ ] Never an empty window: if something fails at startup, a "Try again" message appears instead
+- [ ] Onboarding shows once after upgrading (new features), then never again
+- [ ] While scanning, Home shows the phase plus elapsed time (e.g. "Hunting for duplicates… 1m 05s")
+- [ ] Scans don't start while the index is still being built, and duplicate hashing is capped per scan (no long disk thrashing)
+- [ ] App stays responsive during and after scans (menus, switching views)
+- [ ] Space on C:\ is smooth to hover and switch folders
+- [ ] Duplicate/similar photo on D: and G: → ⋯ › "These folders are backups of each other…" → suggested pair (e.g. D:\Photos ↔ G:\Photos), choose another level or pick folders by hand → findings disappear
+- [ ] Settings › Folders & policies › Mirrored folders lists the pair; Remove works; "Add a mirrored pair" with two folder pickers
+- [ ] Next scan no longer flags photos inside mirrored folders
+
 ## Install & identity
 - [ ] Uninstall the old **Dustling** (Settings › Apps), then install `Dusty_0.2.0_x64-setup.exe`
 - [ ] App, tray icon, window title and toasts all say **Dusty**; icon shows the mascot with headscarf + broom

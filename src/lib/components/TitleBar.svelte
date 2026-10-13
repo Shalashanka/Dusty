@@ -19,15 +19,26 @@
   .bar {
     position: absolute;
     inset: 0 0 auto 84px;
-    height: 46px;
+    height: 32px;
     display: flex;
     z-index: 400;
+  }
+  /* Decorative fade under the strip: never catches clicks. */
+  .bar::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 -14px 0;
+    pointer-events: none;
     background: linear-gradient(
       to bottom,
       var(--bg-solid) 0%,
-      color-mix(in srgb, var(--bg-solid) 85%, transparent) 45%,
+      color-mix(in srgb, var(--bg-solid) 80%, transparent) 55%,
       transparent 100%
     );
+  }
+  .spacer,
+  .controls {
+    position: relative;
   }
   .spacer {
     flex: 1;
@@ -38,7 +49,7 @@
   }
   .controls button {
     width: 46px;
-    height: 34px;
+    height: 32px;
     display: grid;
     place-items: center;
     color: var(--text-2);

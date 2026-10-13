@@ -24,8 +24,11 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
     let mut seen = std::collections::HashSet::new();
     for r in roots {
         for f in collect_files(Path::new(r), 20 * 1024, &skip) {
+            let p = f.path.to_string_lossy().into_owned();
             if EXTS.contains(&ext_of(&f.path).as_str())
-                && seen.insert(f.path.to_string_lossy().to_lowercase())
+                && !s.in_mirror(&p)
+                && !ctx.is_protected(&p)
+                && seen.insert(p.to_lowercase())
             {
                 photos.push(f);
             }

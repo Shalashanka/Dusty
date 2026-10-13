@@ -84,6 +84,7 @@ export interface Snapshot {
   pausedUntil: number;
   stats: Stats;
   idleSecs: number;
+  scanStartedAt: number;
 }
 
 export interface FolderPolicy {
@@ -135,7 +136,9 @@ export interface Settings {
   learn: boolean;
   startWithWindows: boolean;
   onboarded: boolean;
+  seenVersion: number;
   devMode: boolean;
+  mirrors: { a: string; b: string }[];
 }
 
 export interface Outcome {
@@ -332,6 +335,7 @@ export const api = {
   snapshot: () => invoke<Snapshot>("snapshot"),
   ready: () => invoke<void>("ready"),
   scanNow: () => invoke<void>("scan_now"),
+  addMirror: (a: string, b: string) => invoke<void>("add_mirror", { a, b }),
   act: (ids: string[], action: Action) => invoke<Outcome>("act", { ids, action }),
   undo: (historyId: number) => invoke<void>("undo", { historyId }),
   history: (limit?: number) => invoke<HistoryRow[]>("history", { limit }),

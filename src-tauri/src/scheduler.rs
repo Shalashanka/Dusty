@@ -67,7 +67,9 @@ fn run(app: AppHandle) {
         let idle = winsys::idle_secs() >= idle_needed;
         let overdue = t >= due + MAX_DEFER;
         let busy = winsys::user_state() == UserState::Busy;
-        if (idle || overdue) && !busy && !winsys::low_battery() {
+        // Let the index finish first: scans use it, and both hit the disk.
+        let indexing = state.index.building.load(Ordering::Relaxed);
+        if (idle || overdue) && !busy && !indexing && !winsys::low_battery() {
             run_scan(&app, true);
         }
     }
@@ -208,6 +210,7 @@ pub fn run_scan(app: &AppHandle, background: bool) {
         return;
     }
     let started = Instant::now();
+    state.scan_started.store(now(), Ordering::Relaxed);
     set_phase(app, "Waking up");
     emit_changed(app);
 
@@ -349,6 +352,7 @@ pub fn run_scan(app: &AppHandle, background: bool) {
     }
 
     set_phase(app, "");
+    state.scan_started.store(0, Ordering::Relaxed);
     state.scanning.store(false, Ordering::SeqCst);
     tray::refresh(app);
     emit_changed(app);

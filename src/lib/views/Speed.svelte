@@ -253,7 +253,7 @@
 <style>
   .speed {
     height: 100%;
-    padding: 34px 40px 80px;
+    padding: 42px 40px 80px;
   }
   h1 {
     font-size: 28px;

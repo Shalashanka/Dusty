@@ -101,10 +101,13 @@
   }
   const HEADER = 20;
 
+  const MAX_TILES = 900;
   function layout(node: TreeNode, box: { x: number; y: number; w: number; h: number }, depth: number, out: Tile[]) {
     const items = node.children.filter((c) => c.bytes > 0);
     for (const r of squarify(items, (c) => c.bytes, box)) {
-      const nested = r.item.isDir && r.item.children.length > 0 && r.w > 80 && r.h > 56 && depth < 3;
+      // Boxes too small to see or click only cost rendering time.
+      if (out.length >= MAX_TILES || (depth > 0 && r.w * r.h < 220)) continue;
+      const nested = r.item.isDir && r.item.children.length > 0 && r.w > 90 && r.h > 64 && depth < 3;
       out.push({ n: r.item, x: r.x, y: r.y, w: r.w, h: r.h, depth, header: nested });
       if (nested) {
         layout(r.item, { x: r.x + 3, y: r.y + HEADER, w: r.w - 6, h: r.h - HEADER - 3 }, depth + 1, out);
@@ -239,7 +242,6 @@
                 class="tile d{t.depth}"
                 class:dir={t.header}
                 class:sel={picked?.path === t.n.path}
-                class:hov={hovered?.path === t.n.path}
                 style="left:{t.x}px;top:{t.y}px;width:{t.w}px;height:{t.h}px;--c:{c};z-index:{t.depth + 1};animation-delay:{Math.min(i * 6, 300)}ms"
                 onmouseenter={() => (hovered = t.n)}
                 onmouseleave={() => (hovered = null)}
@@ -321,7 +323,7 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 30px 32px 20px;
+    padding: 42px 32px 20px;
     gap: 12px;
   }
   .top {
@@ -424,7 +426,8 @@
     text-align: left;
     border-radius: 7px;
     overflow: hidden;
-    animation: grow 0.45s var(--ease) both;
+    animation: grow 0.35s var(--ease) both;
+    contain: layout paint;
     background: linear-gradient(160deg, color-mix(in srgb, var(--c) 32%, transparent), color-mix(in srgb, var(--c) 14%, transparent));
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 32%, transparent);
     transition:
@@ -435,11 +438,11 @@
     justify-content: flex-start;
     background: color-mix(in srgb, var(--c) 10%, transparent);
   }
-  .tile.hov:not(.dir) {
+  .tile:not(.dir):hover {
     background: linear-gradient(160deg, color-mix(in srgb, var(--c) 55%, transparent), color-mix(in srgb, var(--c) 26%, transparent));
     box-shadow: inset 0 0 0 1.5px var(--c);
   }
-  .tile.dir.hov {
+  .tile.dir:hover {
     box-shadow: inset 0 0 0 1.5px var(--c);
   }
   .tile.sel {

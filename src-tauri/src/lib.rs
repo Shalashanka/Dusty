@@ -110,6 +110,21 @@ pub fn run() {
             watcher::start(app.handle());
             scheduler::start(app.handle().clone());
             let _ = register_hotkey(app.handle());
+            // Safety net: if the UI hasn't asked to be shown after a few
+            // seconds (slow first WebView start), show the window anyway.
+            if !hidden {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    let state = handle.state::<AppState>();
+                    if !state
+                        .shown_once
+                        .swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        show_main(&handle);
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -178,6 +193,7 @@ pub fn run() {
             commands::dev_action,
             commands::app_info,
             commands::toggle_search,
+            commands::add_mirror,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dusty");

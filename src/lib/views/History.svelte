@@ -166,7 +166,7 @@
 <style>
   .history {
     height: 100%;
-    padding: 34px 40px 60px;
+    padding: 42px 40px 60px;
   }
   h1 {
     font-size: 28px;

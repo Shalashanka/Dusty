@@ -23,6 +23,7 @@
     Info,
     Bug,
     ExternalLink,
+    Copy,
   } from "@lucide/svelte";
   import Segmented from "$lib/components/Segmented.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
@@ -102,6 +103,19 @@
   async function pickDest(cat: string) {
     const p = await api.pickFolder();
     if (p) patch({ sortDest: { ...s.sortDest, [cat]: p } });
+  }
+  async function addMirror() {
+    const a = await api.pickFolder();
+    if (!a) return;
+    app.toast("Now pick its mirror (the backup copy).");
+    const b = await api.pickFolder();
+    if (!b) return;
+    try {
+      await api.addMirror(a, b);
+      patch({ mirrors: [...(s.mirrors ?? []), { a, b }] });
+    } catch (e) {
+      app.toast(String(e), { tone: "error" });
+    }
   }
   function toggleDrive(mount: string, on: boolean) {
     const all = app.drives.map((d) => d.mount);
@@ -279,6 +293,19 @@
             {/each}
           </div>
 
+          <h2><Copy size={17} /> Mirrored folders (backups)</h2>
+          <p class="faint hint">Folders that are copies of each other, like a photo archive on two drives. I never compare them for duplicates or similar photos. Tip: use “These folders are backups of each other…” on a duplicate card.</p>
+          <div class="card settings">
+            {#each s.mirrors ?? [] as m, i (m.a + m.b)}
+              <div class="srow">
+                <div><b class="mono ellipsis">{m.a}</b><span class="faint mono ellipsis">↔ {m.b}</span></div>
+                <span></span>
+                <button class="btn sm ghost" onclick={() => patch({ mirrors: s.mirrors.filter((_, j) => j !== i) })}>Remove</button>
+              </div>
+            {/each}
+            <button class="btn sm add" onclick={addMirror}><FolderPlus size={14} /> Add a mirrored pair</button>
+          </div>
+
           <h2><HardDrive size={17} /> Drives I look after</h2>
           <p class="faint hint">These get indexed for search and Space, and checked for duplicates, mystery folders and big dormant files.</p>
           <div class="card settings">
@@ -447,7 +474,7 @@
 <style>
   .rules {
     height: 100%;
-    padding: 34px 40px 80px;
+    padding: 42px 40px 80px;
   }
   h1 {
     font-size: 28px;

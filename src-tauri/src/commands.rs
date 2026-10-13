@@ -26,9 +26,10 @@ pub struct Snapshot {
     paused_until: i64,
     stats: Stats,
     idle_secs: u64,
+    scan_started_at: i64,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot(state: State<AppState>) -> Snapshot {
     Snapshot {
         findings: state.findings.read().clone(),
@@ -40,19 +41,20 @@ pub fn snapshot(state: State<AppState>) -> Snapshot {
         paused_until: state.paused_until.load(Ordering::Relaxed),
         stats: state.store.stats(),
         idle_secs: crate::winsys::idle_secs(),
+        scan_started_at: state.scan_started.load(Ordering::Relaxed),
     }
 }
 
 /// Called by the UI once it has painted; shows the window unless launched
 /// silently at login.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ready(app: AppHandle, state: State<AppState>) {
     if !state.launched_hidden && !state.shown_once.swap(true, Ordering::SeqCst) {
         crate::show_main(&app);
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scan_now(state: State<AppState>) {
     state.request_scan();
 }
@@ -83,17 +85,17 @@ pub async fn undo(app: AppHandle, history_id: i64) -> R<()> {
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn history(state: State<AppState>, limit: Option<u32>) -> Vec<HistoryRow> {
     state.store.history(limit.unwrap_or(300))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_settings(state: State<AppState>) -> Settings {
     state.settings.read().clone()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> R<()> {
     let autostart = app.autolaunch();
     let enabled = autostart.is_enabled().unwrap_or(false);
@@ -122,7 +124,7 @@ pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings)
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pause(app: AppHandle, state: State<AppState>, minutes: i64) {
     let until = if minutes > 0 { now() + minutes * 60 } else { 0 };
     state.paused_until.store(until, Ordering::Relaxed);
@@ -131,7 +133,7 @@ pub fn pause(app: AppHandle, state: State<AppState>, minutes: i64) {
     crate::scheduler::emit_changed(&app);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reveal(path: String) {
     if path.starts_with("shell:") {
         let _ = std::process::Command::new("explorer.exe")
@@ -142,7 +144,7 @@ pub fn reveal(path: String) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_path(path: String) -> R<()> {
     let _ = std::process::Command::new("explorer.exe")
         .arg(&path)
@@ -176,7 +178,7 @@ pub struct Drive {
     fs: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drives() -> Vec<Drive> {
     let disks = sysinfo::Disks::new_with_refreshed_list();
     let mut v: Vec<Drive> = disks
@@ -300,7 +302,7 @@ pub async fn recycle_path(app: AppHandle, path: String, bytes: u64) -> R<i64> {
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn home_dir() -> String {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().into_owned())
@@ -309,12 +311,12 @@ pub fn home_dir() -> String {
 
 // ---- index & search ---------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn index_status(state: State<AppState>) -> crate::index::IndexStatus {
     state.index.status()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn index_rebuild(state: State<AppState>) {
     state.index.rebuild.store(true, Ordering::SeqCst);
 }
@@ -404,7 +406,7 @@ pub async fn space_tree(
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn kb_lookup(paths: Vec<String>) -> Vec<Option<crate::kb::KbHit>> {
     let resolved = crate::kb::resolve();
     paths
@@ -413,7 +415,7 @@ pub fn kb_lookup(paths: Vec<String>) -> Vec<Option<crate::kb::KbHit>> {
         .collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn kb_all() -> Vec<crate::kb::KbEntry> {
     crate::kb::all()
 }
@@ -430,7 +432,7 @@ pub async fn thumbnail(path: String, size: Option<i32>) -> Option<String> {
     .flatten()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_text(path: String, max: Option<usize>) -> R<String> {
     use std::io::Read;
     let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
@@ -443,7 +445,7 @@ pub fn read_text(path: String, max: Option<usize>) -> R<String> {
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_file(path: String) -> R<()> {
     tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())
 }
@@ -474,7 +476,7 @@ pub async fn delete_path(app: AppHandle, path: String, bytes: u64) -> R<()> {
     .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn recycle_bin() -> (u64, u64) {
     crate::winsys::recycle_bin_info()
 }
@@ -510,20 +512,20 @@ pub async fn empty_bin(app: AppHandle) -> R<u64> {
 
 // ---- protection, plans, hibernation -----------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn protect(app: AppHandle, state: State<AppState>, path: String, days: u32) {
     actions::protect(&state, &path, days);
     crate::tray::refresh(&app);
     crate::scheduler::emit_changed(&app);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unprotect(app: AppHandle, state: State<AppState>, path: String) {
     state.store.unprotect(&path);
     crate::scheduler::emit_changed(&app);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn protected_list(state: State<AppState>) -> Vec<crate::store::Protected> {
     state.store.protected()
 }
@@ -562,7 +564,7 @@ pub async fn apply_plan(
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hibernated(state: State<AppState>) -> Vec<crate::store::Hibernated> {
     state.store.hibernated()
 }
@@ -581,7 +583,7 @@ pub async fn wake_project(app: AppHandle, project: String, archive: String) -> R
 
 // ---- speed --------------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn startup_list() -> Vec<crate::health::startup::StartupItem> {
     crate::health::startup::list()
 }
@@ -617,12 +619,12 @@ pub async fn processes(app: AppHandle) -> R<ProcSnapshot> {
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_live_procs(state: State<AppState>, live: bool) {
     state.live_procs.store(live, Ordering::Relaxed);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn kill_processes(state: State<AppState>, pids: Vec<u32>) -> usize {
     state.procs.lock().kill(&pids)
 }
@@ -697,14 +699,14 @@ pub async fn preinstalled_apps() -> R<Vec<crate::health::tune::AppxApp>> {
 
 // ---- search window --------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hide_search(app: AppHandle) {
     if let Some(w) = app.get_webview_window("search") {
         let _ = w.hide();
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_in_dusty(app: AppHandle, view: String) {
     hide_search(app.clone());
     crate::show_main(&app);
@@ -713,7 +715,7 @@ pub fn open_in_dusty(app: AppHandle, view: String) {
 
 // ---- developer mode -------------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn dev_action(app: AppHandle, state: State<AppState>, action: String) -> R<String> {
     match action.as_str() {
         "toast" => {
@@ -777,7 +779,7 @@ pub struct AppInfo {
     debug: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
     AppInfo {
         version: app.package_info().version.to_string(),
@@ -786,7 +788,35 @@ pub fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn toggle_search(app: AppHandle) {
     crate::toggle_search(&app);
+}
+
+/// Marks two folders as backups of each other and drops findings inside them.
+#[tauri::command(async)]
+pub fn add_mirror(app: AppHandle, state: State<AppState>, a: String, b: String) -> R<()> {
+    let mut s = state.settings.read().clone();
+    let m = crate::settings::Mirror {
+        a: a.trim_end_matches('\\').to_string(),
+        b: b.trim_end_matches('\\').to_string(),
+    };
+    if m.a.eq_ignore_ascii_case(&m.b) {
+        return Err("pick two different folders".into());
+    }
+    if !s.mirrors.contains(&m) {
+        s.mirrors.push(m);
+    }
+    state.store.save_settings(&s);
+    state.findings.write().retain(|f| {
+        let hit = |p: &str| s.in_mirror(p);
+        !(matches!(
+            f.kind,
+            crate::model::Kind::Duplicate | crate::model::Kind::SimilarPhoto
+        ) && (hit(&f.path) || f.related.iter().any(|r| hit(r))))
+    });
+    *state.settings.write() = s;
+    crate::tray::refresh(&app);
+    crate::scheduler::emit_changed(&app);
+    Ok(())
 }

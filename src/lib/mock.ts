@@ -109,6 +109,8 @@ const settings: Settings = {
   startWithWindows: true,
   onboarded: new URLSearchParams(location.search).get("onboarding") === null,
   devMode: false,
+  seenVersion: 2,
+  mirrors: [{ a: "D:\Photos", b: "G:\Photos" }],
 };
 
 const history: HistoryRow[] = [
@@ -130,6 +132,7 @@ function snapshot(): Snapshot {
     pausedUntil: 0,
     stats: { freedTotal: 12.4e9, freedWeek: 8.6e9, tidiedTotal: 23, actionsTotal: 57, keptTotal: 9, streakDays: 3 },
     idleSecs: 0,
+    scanStartedAt: 0,
   };
 }
 

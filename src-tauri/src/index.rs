@@ -617,7 +617,7 @@ pub fn tree(idx: &Index, path: &str, depth: usize) -> Option<TreeNode> {
             break;
         }
     }
-    let limits = [80usize, 24, 10, 6];
+    let limits = [60usize, 16, 8, 5];
     fn node(
         idx: &Index,
         i: u32,

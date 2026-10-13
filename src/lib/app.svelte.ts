@@ -26,6 +26,21 @@ export function driveOf(path: string): string {
   return /^[a-z]:/i.test(path) ? path.slice(0, 2).toUpperCase() : "";
 }
 
+/** Retries a startup call a few times (the backend may still be warming up). */
+async function withRetry<T>(fn: () => Promise<T>, tries = 5): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= tries - 1) throw e;
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+}
+
+/** Bump when onboarding gains steps worth showing to existing users. */
+export const ONBOARDING_VERSION = 2;
+
 class AppStore {
   view = $state<View>("home");
   filter = $state<Kind | "all">("all");
@@ -42,6 +57,8 @@ class AppStore {
   paletteOpen = $state(false);
   /** Folder whose organizing plan is open, if any. */
   planFolder = $state<string | null>(null);
+  /** Duplicate + original whose folders may be mirrors (opens the mirror picker). */
+  mirrorPair = $state<{ a: string; b: string } | null>(null);
   /** Bytes freed since the window was opened, for the triage counter. */
   sessionFreed = $state(0);
 
@@ -67,21 +84,15 @@ class AppStore {
   #driveTimer: ReturnType<typeof setTimeout> | undefined;
 
   async init() {
-    const [snap, settings, drives, home, index, bin] = await Promise.all([
-      api.snapshot(),
-      api.getSettings(),
-      api.drives(),
-      api.homeDir(),
-      api.indexStatus(),
-      api.recycleBin(),
-    ]);
+    // Settings and the snapshot are essential; everything else may arrive late.
+    const [snap, settings] = await Promise.all([withRetry(api.snapshot), withRetry(api.getSettings)]);
     this.snap = snap;
     this.settings = settings;
-    this.drives = drives;
-    this.home = home;
-    this.index = index;
-    this.bin = bin;
     this.phase = snap.phase;
+    api.drives().then((d) => (this.drives = d)).catch(() => {});
+    api.homeDir().then((h) => (this.home = h)).catch(() => {});
+    api.indexStatus().then((i) => (this.index = i)).catch(() => {});
+    api.recycleBin().then((b) => (this.bin = b)).catch(() => {});
 
     await listen("changed", () => {
       this.refresh();

@@ -105,7 +105,11 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
             }
         }
     }
-    files.retain(|f| !ctx.is_protected(&f.path.to_string_lossy()));
+    // Protected folders and mirrored backups are never compared.
+    files.retain(|f| {
+        let p = f.path.to_string_lossy();
+        !ctx.is_protected(&p) && !s.in_mirror(&p)
+    });
 
     let mut out = Vec::new();
     if s.on(Kind::BigDormant) {
@@ -196,7 +200,8 @@ fn duplicates(ctx: &Ctx, files: Vec<FileEntry>) -> Vec<Finding> {
         by_head.entry((size, h)).or_default().push(f);
     }
     let cache = ctx.store.hashes("xxh3");
-    let mut budget: u64 = 40 << 30; // bytes read per scan
+    // Bytes fully read per scan; the rest is picked up (and cached) next time.
+    let mut budget: u64 = 3 << 30;
     let mut todo = Vec::new();
     let mut full: Vec<(u64, u64, FileEntry)> = Vec::new();
     for f in by_head.into_values().filter(|g| g.len() > 1).flatten() {
