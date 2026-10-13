@@ -1,26 +1,45 @@
 //! Detectors: each one inspects part of the filesystem and emits findings.
 
 mod desktop;
-mod dev;
+pub mod dev;
 mod dupes;
-mod inbox;
+mod health;
+pub mod inbox;
+mod photos;
+mod plans;
 mod system;
+mod unsure;
 
 pub use desktop::{SWEPT_DIR, remove_empty_tree};
 
+use crate::health::procs::ProcGroup;
+use crate::health::startup::StartupItem;
+use crate::index::Index;
+use crate::kb::KbHit;
 use crate::model::{Finding, Kind};
 use crate::settings::Settings;
-use std::collections::HashMap;
+use crate::store::Store;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 pub struct Ctx<'a> {
     pub s: &'a Settings,
     pub now: i64,
     /// Lowercased path -> first time the watcher saw it arrive.
     pub first_seen: HashMap<String, i64>,
-    /// Normalized names of installed programs.
+    /// Names of installed programs.
     pub installed: Vec<String>,
     pub phase: &'a (dyn Fn(&str) + Sync),
+    /// Lowercase path prefixes the user asked Dusty not to touch.
+    pub protected: Vec<String>,
+    pub index: Option<Arc<Index>>,
+    pub kb: Vec<KbHit>,
+    pub store: &'a Store,
+    pub suppressed: HashSet<String>,
+    pub startup: Vec<StartupItem>,
+    pub startup_known: HashSet<String>,
+    pub hogs: Vec<ProcGroup>,
 }
 
 impl Ctx<'_> {
@@ -33,6 +52,13 @@ impl Ctx<'_> {
             .get(&p.to_string_lossy().to_lowercase())
             .copied()
             .unwrap_or(0)
+    }
+
+    pub fn is_protected(&self, path: &str) -> bool {
+        let low = path.trim_end_matches('\\').to_lowercase();
+        self.protected
+            .iter()
+            .any(|p| low == *p || low.starts_with(&format!("{p}\\")))
     }
 }
 
@@ -51,7 +77,11 @@ pub fn run(ctx: &Ctx) -> Vec<Finding> {
         out.extend(desktop::scan(ctx));
     }
 
-    if s.on(Kind::DevJunk) && !s.dev_roots.is_empty() {
+    if s.on(Kind::FolderPlan) {
+        out.extend(plans::scan(ctx));
+    }
+
+    if (s.on(Kind::DevJunk) || s.on(Kind::StaleProject)) && !s.dev_roots.is_empty() {
         (ctx.phase)("Checking on your old projects");
         out.extend(dev::scan(ctx));
     }
@@ -61,11 +91,24 @@ pub fn run(ctx: &Ctx) -> Vec<Finding> {
         out.extend(dupes::scan(ctx));
     }
 
+    if s.on(Kind::SimilarPhoto) {
+        (ctx.phase)("Comparing photos");
+        out.extend(photos::scan(ctx));
+    }
+
+    if s.on(Kind::Unsure) {
+        (ctx.phase)("Wondering about old folders");
+        out.extend(unsure::scan(ctx));
+    }
+
     if s.on(Kind::SystemJunk) || s.on(Kind::RecycleBin) {
         (ctx.phase)("Sweeping temp folders and caches");
         out.extend(system::scan(ctx));
     }
 
+    out.extend(health::scan(ctx));
+
+    out.retain(|f| !f.kind.is_file_based() || !ctx.is_protected(&f.path));
     dedupe(out)
 }
 
@@ -99,6 +142,7 @@ mod tests {
     #[ignore]
     fn real_scan() {
         let s = Settings::default();
+        let store = crate::store::Store::memory();
         let t = std::time::Instant::now();
         let phase = |p: &str| eprintln!("[{:>6} ms] {p}", t.elapsed().as_millis());
         let ctx = Ctx {
@@ -107,6 +151,14 @@ mod tests {
             first_seen: HashMap::new(),
             installed: crate::winsys::installed_programs(),
             phase: &phase,
+            protected: vec![],
+            index: None,
+            kb: crate::kb::resolve(),
+            store: &store,
+            suppressed: Default::default(),
+            startup: crate::health::startup::list(),
+            startup_known: Default::default(),
+            hogs: vec![],
         };
         let found = run(&ctx);
         eprintln!("{} findings in {} ms", found.len(), t.elapsed().as_millis());

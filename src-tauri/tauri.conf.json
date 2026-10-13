@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Dustling",
+  "productName": "Dusty",
   "version": "0.1.0",
-  "identifier": "com.griz.dustling",
+  "identifier": "com.griz.dusty",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Dustling",
+        "title": "Dusty",
         "width": 1180,
         "height": 780,
         "minWidth": 920,
@@ -24,16 +24,44 @@
         "transparent": true,
         "shadow": true,
         "visible": false,
-        "windowEffects": { "effects": ["mica"] }
+        "windowEffects": {
+          "effects": [
+            "mica"
+          ]
+        }
+      },
+      {
+        "label": "search",
+        "title": "Dusty Search",
+        "url": "/search",
+        "width": 760,
+        "height": 520,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "visible": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true,
+        "focus": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "**"
+        ]
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "category": "Utility",
     "shortDescription": "A tiny housekeeper for your PC",
     "icon": [
@@ -44,7 +72,9 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": {
+        "installMode": "currentUser"
+      }
     }
   }
 }

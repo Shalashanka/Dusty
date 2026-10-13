@@ -1,4 +1,4 @@
-# Dustling: plan
+# Dusty: plan
 
 > A tiny housekeeper that lives in the tray, wanders the filesystem when you're
 > not looking, and taps you on the shoulder when it finds something worth your
@@ -16,7 +16,7 @@ Hyperfocus cycles produce a predictable mess:
 - Temp folders, caches and crash dumps grow silently.
 - Every few months the only "fix" is a full reinstall.
 
-Dustling makes cleaning **continuous, small and low-friction**: a few
+Dusty makes cleaning **continuous, small and low-friction**: a few
 decisions every few days instead of a format once a year.
 
 ## 2. Design principles
@@ -26,11 +26,11 @@ decisions every few days instead of a format once a year.
    (caches, build output), or when explicitly chosen.
 2. **Ask little, ask well.** Group findings, explain *why* ("downloaded from
    github.com 5 months ago, never touched since"), make decisions one keypress.
-3. **Remember decisions.** "Keep" means keep, and Dustling never asks again about the
+3. **Remember decisions.** "Keep" means keep, and Dusty never asks again about the
    same file. "Snooze" means come back later.
 4. **Invisible when working.** Scans run only when the PC is idle, at
    background CPU *and I/O* priority, never during fullscreen/games/presentations.
-5. **Earned autonomy.** Each rule can be promoted to *Autopilot*: Dustling acts
+5. **Earned autonomy.** Each rule can be promoted to *Autopilot*: Dusty acts
    on its own and just reports what it did.
 6. **Feels alive.** A mascot with moods (sleeping / sweeping / proud / curious),
    fluid animations, instant UI.
@@ -38,7 +38,7 @@ decisions every few days instead of a format once a year.
 ## 3. Architecture
 
 ```
-┌────────────────────────── Dustling.exe (Tauri 2) ──────────────────────────┐
+┌────────────────────────── Dusty.exe (Tauri 2) ──────────────────────────┐
 │                                                                            │
 │  Svelte 5 UI (WebView2, Mica)          Rust core                           │
 │  ┌──────────────────────┐   IPC    ┌───────────────────────────────────┐   │
@@ -63,7 +63,7 @@ decisions every few days instead of a format once a year.
   autostart, single instance, ~10 MB binary, near-zero idle CPU. A web UI
   layer is the most practical way to get 2026-grade motion design.
 - **Svelte 5**: compiled, tiny runtime, first-class transitions/springs.
-- **SQLite (bundled rusqlite)**: one file in `%LOCALAPPDATA%\Dustling`.
+- **SQLite (bundled rusqlite)**: one file in `%LOCALAPPDATA%\Dusty`.
 
 ### Scheduler ("time-dilated" checks)
 - Base tick every 60 s, cheap: reads idle time (`GetLastInputInfo`),

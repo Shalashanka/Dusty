@@ -1,4 +1,4 @@
-# Dustling: agent notes
+# Dusty: agent notes
 
 ## Hard rules
 - NEVER add `Co-Authored-By` AI trailers to commits; never add "Generated with ..." to PRs.
@@ -10,5 +10,5 @@
 - Plan / roadmap: `docs/PLAN.md`.
 - Dev: `pnpm tauri dev`. Release: `pnpm tauri build` (NSIS installer).
 - Rust checks: `cargo check` / `cargo test` in `src-tauri/`. Frontend: `pnpm check`.
-- Data lives in `%LOCALAPPDATA%\Dustling\dustling.db` (SQLite).
+- Data lives in `%LOCALAPPDATA%\Dusty\dusty.db` (SQLite).
 - Safety: default action is Recycle Bin; every action is logged with undo info.

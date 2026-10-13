@@ -1,4 +1,4 @@
-# Dustling
+# Dusty
 
 A tiny housekeeper that lives in your Windows tray. It looks around your PC
 while you're away, notices what's gathering dust, and asks before touching anything.

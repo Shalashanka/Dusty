@@ -1,4 +1,4 @@
-//! Watches inbox folders (Downloads, Desktop) so Dustling knows when things
+//! Watches inbox folders (Downloads, Desktop) so Dusty knows when things
 //! *arrived*, which file timestamps often hide.
 
 use crate::state::AppState;

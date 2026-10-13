@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MARKERS: &[&str] = &[
+pub const MARKERS: &[&str] = &[
     ".git",
     "package.json",
     "cargo.toml",
@@ -46,12 +46,12 @@ const ALWAYS: &[&str] = &[
     ".build",
 ];
 
-struct Listing {
+pub struct Listing {
     names: Vec<String>,
 }
 
 impl Listing {
-    fn of(dir: &Path) -> Self {
+    pub fn of(dir: &Path) -> Self {
         let names = fs::read_dir(dir)
             .map(|rd| {
                 rd.flatten()
@@ -61,19 +61,19 @@ impl Listing {
             .unwrap_or_default();
         Listing { names }
     }
-    fn has(&self, n: &str) -> bool {
+    pub fn has(&self, n: &str) -> bool {
         self.names.iter().any(|x| x == n)
     }
-    fn has_ext(&self, ext: &str) -> bool {
+    pub fn has_ext(&self, ext: &str) -> bool {
         self.names.iter().any(|x| x.ends_with(ext))
     }
-    fn is_project(&self) -> bool {
+    pub fn is_project(&self) -> bool {
         MARKERS.iter().any(|m| self.has(m)) || self.has_ext(".sln") || self.has_ext(".csproj")
     }
 }
 
 /// Is `name` (a child dir of a folder whose contents are `parent`) rebuildable?
-fn is_junk(name: &str, dir: &Path, parent: &Listing) -> bool {
+pub fn is_junk(name: &str, dir: &Path, parent: &Listing) -> bool {
     if ALWAYS.contains(&name) {
         return true;
     }
@@ -169,30 +169,58 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
     let min_bytes = s.junk_min_mb as u64 * 1_048_576;
     projects
         .par_iter()
+        .filter(|p| !ctx.is_protected(&p.to_string_lossy()))
         .filter_map(|proj| {
             let (junk, newest_src) = survey(proj, 0);
-            if junk.is_empty() {
-                return None;
-            }
-            let active = newest_src.max(git_activity(proj));
+            let last_commit = git_activity(proj);
+            let active = newest_src.max(last_commit);
             let idle = ctx.age_days(active);
             if idle < s.dev_idle_days as i64 {
                 return None;
             }
             let stats: Vec<walk::DirStats> = junk.par_iter().map(|j| walk::dir_stats(j)).collect();
-            let bytes: u64 = stats.iter().map(|st| st.bytes).sum();
-            if bytes < min_bytes {
-                return None;
-            }
-            let files: u64 = stats.iter().map(|st| st.files).sum();
+            let junk_bytes: u64 = stats.iter().map(|st| st.bytes).sum();
             let mut kinds: Vec<String> = junk.iter().map(|j| name_of(j)).collect();
             kinds.sort();
             kinds.dedup();
             let list = match kinds.len() {
+                0 => String::new(),
                 1 => kinds[0].clone(),
                 2 => format!("{} and {}", kinds[0], kinds[1]),
                 _ => format!("{}, {} and {} more", kinds[0], kinds[1], kinds.len() - 2),
             };
+
+            // Asleep for a long time: suggest hibernating the whole project.
+            if s.on(Kind::StaleProject) && idle >= s.stale_project_days as i64 {
+                let total = walk::dir_stats(proj);
+                if total.bytes >= 1_048_576 {
+                    let mut f = Finding::new(
+                        Kind::StaleProject,
+                        &proj.to_string_lossy(),
+                        name_of(proj),
+                        Action::Hibernate,
+                        vec![Action::Hibernate, Action::Archive, Action::Recycle, Action::Keep, Action::Snooze],
+                    );
+                    f.related = junk.iter().map(|j| j.to_string_lossy().into_owned()).collect();
+                    f.bytes = total.bytes;
+                    f.items = total.files;
+                    f.is_dir = true;
+                    f.last_touched = active;
+                    f.confidence = (0.45 + idle as f32 / 1500.0).min(0.8);
+                    let git = if last_commit > 0 { " (git included)" } else { "" };
+                    f.reason = format!(
+                        "Nobody touched this project in {}. Might it be finished or abandoned? I can hibernate it: zip the code{git} to cold storage{}, and leave a note here so you can wake it up in one click.",
+                        human_age(idle),
+                        if list.is_empty() { String::new() } else { format!(" without the rebuildable {list}") }
+                    );
+                    return Some(f);
+                }
+            }
+
+            if !s.on(Kind::DevJunk) || junk.is_empty() || junk_bytes < min_bytes {
+                return None;
+            }
+            let files: u64 = stats.iter().map(|st| st.files).sum();
             let mut f = Finding::new(
                 Kind::DevJunk,
                 &proj.to_string_lossy(),
@@ -201,7 +229,7 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
                 vec![Action::Delete, Action::Keep, Action::Snooze],
             );
             f.related = junk.iter().map(|j| j.to_string_lossy().into_owned()).collect();
-            f.bytes = bytes;
+            f.bytes = junk_bytes;
             f.items = files;
             f.is_dir = true;
             f.last_touched = active;
@@ -222,7 +250,7 @@ mod tests {
 
     #[test]
     fn finds_junk_only_where_regenerable() {
-        let d = std::env::temp_dir().join(format!("dustling-dev-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("dusty-dev-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         let app = d.join("app");
         fs::create_dir_all(app.join("node_modules/x")).unwrap();

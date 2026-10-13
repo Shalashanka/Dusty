@@ -52,7 +52,19 @@ impl Store {
                  dest TEXT, bytes INTEGER NOT NULL, batch TEXT NOT NULL,
                  undoable INTEGER NOT NULL, undone INTEGER NOT NULL DEFAULT 0,
                  auto INTEGER NOT NULL DEFAULT 0);
-             CREATE INDEX IF NOT EXISTS history_at ON history(at);",
+             CREATE INDEX IF NOT EXISTS history_at ON history(at);
+             CREATE TABLE IF NOT EXISTS protected (
+                 path TEXT PRIMARY KEY, until INTEGER NOT NULL, at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS verdicts (
+                 kind TEXT NOT NULL, ext TEXT NOT NULL, host TEXT NOT NULL,
+                 folder TEXT NOT NULL, verdict TEXT NOT NULL, at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS hashes (
+                 path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL,
+                 kind TEXT NOT NULL, hash INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS hibernated (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, archive TEXT NOT NULL,
+                 bytes INTEGER NOT NULL, files INTEGER NOT NULL, at INTEGER NOT NULL,
+                 restored INTEGER NOT NULL DEFAULT 0);",
         )?;
         Ok(Store {
             conn: Mutex::new(conn),
@@ -311,6 +323,208 @@ impl Store {
             }
         }
         st
+    }
+}
+
+/// A path the user asked Dusty to leave alone.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Protected {
+    pub path: String,
+    /// 0 = forever.
+    pub until: i64,
+    pub at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hibernated {
+    pub id: i64,
+    pub project: String,
+    pub archive: String,
+    pub bytes: u64,
+    pub files: u64,
+    pub at: i64,
+    pub restored: bool,
+}
+
+/// Keep/remove tallies for a feature (extension, origin host...).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Tally {
+    pub keep: u32,
+    pub remove: u32,
+}
+
+impl Store {
+    // ---- protection -------------------------------------------------------
+
+    pub fn protect(&self, path: &str, until: i64) {
+        let _ = self.conn.lock().execute(
+            "INSERT INTO protected(path, until, at) VALUES(?1, ?2, ?3)
+             ON CONFLICT(path) DO UPDATE SET until=excluded.until, at=excluded.at",
+            params![path.trim_end_matches('\\').to_lowercase(), until, now()],
+        );
+    }
+
+    pub fn unprotect(&self, path: &str) {
+        let _ = self
+            .conn
+            .lock()
+            .execute("DELETE FROM protected WHERE path=?1", [path.to_lowercase()]);
+    }
+
+    pub fn protected(&self) -> Vec<Protected> {
+        let conn = self.conn.lock();
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT path, until, at FROM protected WHERE until=0 OR until>?1 ORDER BY at DESC",
+        ) else {
+            return vec![];
+        };
+        stmt.query_map([now()], |r| {
+            Ok(Protected {
+                path: r.get(0)?,
+                until: r.get(1)?,
+                at: r.get(2)?,
+            })
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    // ---- learning ---------------------------------------------------------
+
+    pub fn add_verdict(&self, kind: &str, ext: &str, host: &str, folder: &str, verdict: &str) {
+        let _ = self.conn.lock().execute(
+            "INSERT INTO verdicts(kind, ext, host, folder, verdict, at) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![kind, ext, host, folder, verdict, now()],
+        );
+    }
+
+    /// Tallies keyed by "ext:<kind>:<ext>", "host:<host>", "folder:<folder>".
+    pub fn tallies(&self) -> HashMap<String, Tally> {
+        let conn = self.conn.lock();
+        let mut out: HashMap<String, Tally> = HashMap::new();
+        let Ok(mut stmt) = conn.prepare("SELECT kind, ext, host, folder, verdict FROM verdicts")
+        else {
+            return out;
+        };
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        });
+        if let Ok(rows) = rows {
+            for (kind, ext, host, folder, verdict) in rows.flatten() {
+                let mut keys = vec![];
+                if !ext.is_empty() {
+                    keys.push(format!("ext:{kind}:{ext}"));
+                }
+                if !host.is_empty() {
+                    keys.push(format!("host:{host}"));
+                }
+                if !folder.is_empty() {
+                    keys.push(format!("folder:{folder}"));
+                }
+                for key in keys {
+                    let t = out.entry(key).or_default();
+                    if verdict == "keep" {
+                        t.keep += 1
+                    } else {
+                        t.remove += 1
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    // ---- hash cache -------------------------------------------------------
+
+    pub fn hashes(&self, kind: &str) -> HashMap<String, (u64, i64, u64)> {
+        let conn = self.conn.lock();
+        let Ok(mut stmt) = conn.prepare("SELECT path, size, mtime, hash FROM hashes WHERE kind=?1")
+        else {
+            return HashMap::new();
+        };
+        stmt.query_map([kind], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (
+                    r.get::<_, i64>(1)? as u64,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)? as u64,
+                ),
+            ))
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    pub fn put_hashes(&self, kind: &str, rows: &[(String, u64, i64, u64)]) {
+        let mut conn = self.conn.lock();
+        if let Ok(tx) = conn.transaction() {
+            if let Ok(mut stmt) = tx.prepare(
+                "INSERT INTO hashes(path,size,mtime,kind,hash) VALUES(?1,?2,?3,?4,?5)
+                 ON CONFLICT(path) DO UPDATE SET size=excluded.size, mtime=excluded.mtime, kind=excluded.kind, hash=excluded.hash",
+            ) {
+                for (p, size, mtime, h) in rows {
+                    let _ = stmt.execute(params![p, *size as i64, mtime, kind, *h as i64]);
+                }
+            }
+            let _ = tx.commit();
+        }
+    }
+
+    // ---- hibernated projects ---------------------------------------------
+
+    pub fn add_hibernated(&self, project: &str, archive: &str, bytes: u64, files: u64) -> i64 {
+        let conn = self.conn.lock();
+        let _ = conn.execute(
+            "INSERT INTO hibernated(project, archive, bytes, files, at) VALUES(?1,?2,?3,?4,?5)",
+            params![project, archive, bytes as i64, files as i64, now()],
+        );
+        conn.last_insert_rowid()
+    }
+
+    pub fn hibernated(&self) -> Vec<Hibernated> {
+        let conn = self.conn.lock();
+        let Ok(mut stmt) =
+            conn.prepare("SELECT id, project, archive, bytes, files, at, restored FROM hibernated ORDER BY at DESC")
+        else {
+            return vec![];
+        };
+        stmt.query_map([], |r| {
+            Ok(Hibernated {
+                id: r.get(0)?,
+                project: r.get(1)?,
+                archive: r.get(2)?,
+                bytes: r.get::<_, i64>(3)? as u64,
+                files: r.get::<_, i64>(4)? as u64,
+                at: r.get(5)?,
+                restored: r.get(6)?,
+            })
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    pub fn mark_restored(&self, archive: &str) {
+        let _ = self.conn.lock().execute(
+            "UPDATE hibernated SET restored=1 WHERE archive=?1",
+            [archive],
+        );
+    }
+
+    /// Wipes everything except settings (developer mode).
+    pub fn reset_all(&self) {
+        let _ = self.conn.lock().execute_batch(
+            "DELETE FROM kv WHERE k <> 'settings'; DELETE FROM decisions; DELETE FROM first_seen; DELETE FROM seen;
+             DELETE FROM history; DELETE FROM protected; DELETE FROM verdicts; DELETE FROM hashes;",
+        );
     }
 }
 

@@ -94,7 +94,10 @@ fn base(ctx: &Ctx, it: &Item, kind: Kind, suggested: Action) -> Finding {
 pub fn scan(ctx: &Ctx) -> Vec<Finding> {
     let s = ctx.s;
     let mut out = Vec::new();
-    for dir in &s.inbox_dirs {
+    for dir in s.inbox_dirs.iter().chain(s.watched_dirs.iter()) {
+        if ctx.is_protected(dir) {
+            continue;
+        }
         let dir = Path::new(dir);
         let items = load_items(ctx, dir);
         let dir_names: HashSet<String> = items
@@ -442,7 +445,7 @@ fn name_tokens(stem: &str) -> Vec<String> {
 /// Matches `DiscordSetup.exe` to "Discord", `node-v20.11.0-x64` to "Node.js".
 /// Every distinctive word must appear, so `NVIDIA_Broadcast` never matches
 /// "NVIDIA Nsight".
-fn match_installed(stem: &str, installed: &[String]) -> Option<String> {
+pub fn match_installed(stem: &str, installed: &[String]) -> Option<String> {
     let toks = name_tokens(stem);
     let first = toks.first()?;
     installed
@@ -531,7 +534,7 @@ mod tests {
 
     #[test]
     fn originals() {
-        let d = std::env::temp_dir().join(format!("dustling-orig-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("dusty-orig-{}", std::process::id()));
         std::fs::create_dir_all(d.join("OpusStudio")).unwrap();
         std::fs::write(d.join("settings.local.json"), b"{}").unwrap();
         assert_eq!(

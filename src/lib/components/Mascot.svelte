@@ -49,7 +49,7 @@
   height={size}
   viewBox="0 0 200 200"
   role="img"
-  aria-label="Dustling, feeling {mood}"
+  aria-label="Dusty, feeling {mood}"
 >
   <defs>
     <radialGradient id="body-{uid}" cx="38%" cy="30%" r="75%">

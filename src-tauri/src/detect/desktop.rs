@@ -7,7 +7,7 @@ use crate::walk::{self, children, ext_of, is_hidden, is_link, name_of};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const SWEPT_DIR: &str = "Swept by Dustling";
+pub const SWEPT_DIR: &str = "Swept by Dusty";
 
 pub fn scan(ctx: &Ctx) -> Vec<Finding> {
     let s = ctx.s;

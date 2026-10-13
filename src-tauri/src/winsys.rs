@@ -1,4 +1,4 @@
-//! Thin wrappers over the Win32 bits Dustling needs.
+//! Thin wrappers over the Win32 bits Dusty needs.
 
 use std::path::Path;
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
@@ -146,7 +146,7 @@ pub fn installed_programs() -> Vec<String> {
     out
 }
 
-/// Registers an AppUserModelID so toasts show "Dustling" with our icon even
+/// Registers an AppUserModelID so toasts show "Dusty" with our icon even
 /// when running unpackaged.
 pub fn register_app_id(app_id: &str, display_name: &str, icon: &Path) -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -161,7 +161,7 @@ pub fn register_app_id(app_id: &str, display_name: &str, icon: &Path) -> bool {
         && key.set_value("IconBackgroundColor", &"FF17151F").is_ok();
     unsafe {
         let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!(
-            "com.griz.dustling"
+            "com.griz.dusty"
         ));
     }
     ok
@@ -173,4 +173,100 @@ pub fn reveal(path: &str) {
     let _ = std::process::Command::new("explorer.exe")
         .raw_arg(format!("/select,\"{path}\""))
         .spawn();
+}
+
+/// Runs a program elevated (UAC prompt), hidden, and waits for it.
+/// Returns the exit code.
+pub fn run_elevated(file: &str, params: &str) -> Result<u32, String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
+    use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+    use windows::core::HSTRING;
+    let verb = HSTRING::from("runas");
+    let file_h = HSTRING::from(file);
+    let params_h = HSTRING::from(params);
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: PCWSTR(verb.as_ptr()),
+        lpFile: PCWSTR(file_h.as_ptr()),
+        lpParameters: PCWSTR(params_h.as_ptr()),
+        nShow: SW_HIDE.0,
+        ..Default::default()
+    };
+    unsafe {
+        ShellExecuteExW(&mut info).map_err(|e| {
+            if e.code().0 as u32 == 0x800704C7 {
+                "you declined the permission prompt".to_string()
+            } else {
+                e.message()
+            }
+        })?;
+        if info.hProcess.is_invalid() {
+            return Ok(0);
+        }
+        WaitForSingleObject(info.hProcess, INFINITE);
+        let mut code = 0u32;
+        let _ = GetExitCodeProcess(info.hProcess, &mut code);
+        let _ = CloseHandle(info.hProcess);
+        Ok(code)
+    }
+}
+
+/// Runs a PowerShell snippet without a window and returns stdout.
+pub fn powershell(script: &str) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() && out.stdout.is_empty() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Runs a console program without a window and returns stdout.
+pub fn quiet(exe: &str, args: &[&str]) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new(exe)
+        .args(args)
+        .creation_flags(0x0800_0000)
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Process ids that own at least one visible top-level window.
+pub fn pids_with_windows() -> std::collections::HashSet<u32> {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
+    };
+    use windows::core::BOOL;
+    unsafe extern "system" fn cb(hwnd: HWND, lp: LPARAM) -> BOOL {
+        unsafe {
+            if IsWindowVisible(hwnd).as_bool() {
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                let set = &mut *(lp.0 as *mut std::collections::HashSet<u32>);
+                set.insert(pid);
+            }
+        }
+        BOOL(1)
+    }
+    let mut set = std::collections::HashSet::new();
+    unsafe {
+        let _ = EnumWindows(Some(cb), LPARAM(&mut set as *mut _ as isize));
+    }
+    set
 }

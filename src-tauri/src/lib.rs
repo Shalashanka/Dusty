@@ -1,11 +1,20 @@
 mod actions;
 mod commands;
 mod detect;
+mod health;
+mod hibernate;
+mod index;
+mod kb;
+mod learn;
+mod migrate;
 mod model;
+mod nlq;
+mod organize;
 mod scheduler;
 mod settings;
 mod state;
 mod store;
+mod thumbs;
 mod timeutil;
 mod toast;
 mod tray;
@@ -14,7 +23,8 @@ mod watcher;
 mod winsys;
 
 use state::AppState;
-use tauri::{AppHandle, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -22,6 +32,38 @@ pub fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     }
+}
+
+/// Spotlight-style search: toggles the floating search window.
+pub fn toggle_search(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("search") else {
+        return;
+    };
+    if w.is_visible().unwrap_or(false) {
+        let _ = w.hide();
+    } else {
+        let _ = w.center();
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = app.emit_to("search", "search-open", ());
+    }
+}
+
+/// (Re)binds the global search hotkey from settings.
+pub fn register_hotkey(app: &AppHandle) -> Result<(), String> {
+    let combo = app
+        .state::<AppState>()
+        .settings
+        .read()
+        .search_hotkey
+        .clone();
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    if combo.trim().is_empty() {
+        return Ok(());
+    }
+    gs.register(combo.as_str())
+        .map_err(|e| format!("couldn't use {combo} as a shortcut: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,14 +80,22 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        toggle_search(app);
+                    }
+                })
+                .build(),
+        )
         .setup(move |app| {
-            let data_dir = dirs::data_local_dir()
-                .unwrap_or_else(std::env::temp_dir)
-                .join("Dustling");
+            let data_dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let store = store::Store::open(&data_dir.join("dustling.db"))?;
+            migrate::run(&data_dir);
+            let store = store::Store::open(&data_dir.join("dusty.db"))?;
             let first_run = store.get("settings").is_none();
-            app.manage(AppState::new(store, hidden));
+            app.manage(AppState::new(store, data_dir.clone(), hidden));
 
             // Debug builds never register themselves to run at login.
             if first_run && !cfg!(debug_assertions) {
@@ -59,14 +109,20 @@ pub fn run() {
             tray::create(app.handle())?;
             watcher::start(app.handle());
             scheduler::start(app.handle().clone());
+            let _ = register_hotkey(app.handle());
             Ok(())
         })
-        .on_window_event(|window, event| {
-            // Closing the window just tucks Dustling back into the tray.
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            // Closing the window just tucks Dusty back into the tray.
+            WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            // The search popup disappears when you click elsewhere.
+            WindowEvent::Focused(false) if window.label() == "search" => {
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
@@ -85,7 +141,43 @@ pub fn run() {
             commands::space,
             commands::recycle_path,
             commands::home_dir,
+            commands::index_status,
+            commands::index_rebuild,
+            commands::search,
+            commands::space_tree,
+            commands::kb_lookup,
+            commands::kb_all,
+            commands::thumbnail,
+            commands::read_text,
+            commands::open_file,
+            commands::delete_path,
+            commands::recycle_bin,
+            commands::empty_bin,
+            commands::protect,
+            commands::unprotect,
+            commands::protected_list,
+            commands::make_plan,
+            commands::apply_plan,
+            commands::hibernated,
+            commands::wake_project,
+            commands::startup_list,
+            commands::startup_set,
+            commands::processes,
+            commands::set_live_procs,
+            commands::kill_processes,
+            commands::system_files,
+            commands::power_plans,
+            commands::set_power_plan,
+            commands::optimize_info,
+            commands::optimize_drive,
+            commands::analyze_drive,
+            commands::tune,
+            commands::preinstalled_apps,
+            commands::hide_search,
+            commands::open_in_dusty,
+            commands::dev_action,
+            commands::app_info,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Dustling");
+        .expect("error while running Dusty");
 }

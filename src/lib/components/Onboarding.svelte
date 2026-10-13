@@ -28,7 +28,7 @@
     <div class="panel" in:fly={{ y: 24, duration: 500, easing: cubicOut }}>
       {#if step === 0}
         <div class="m" in:fly={{ y: 30, duration: 700, easing: backOut }}><Mascot mood="happy" size={190} /></div>
-        <h1>Hi, I'm Dustling.</h1>
+        <h1>Hi, I'm Dusty.</h1>
         <p class="muted">
           I live in your tray and quietly look around when you step away. When something starts gathering dust, like an old installer or a
           forgotten zip, I'll give you a little nudge.

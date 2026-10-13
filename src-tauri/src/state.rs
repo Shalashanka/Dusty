@@ -1,8 +1,12 @@
+use crate::health::procs::Monitor;
+use crate::index::IndexState;
 use crate::model::{Finding, ScanSummary};
 use crate::settings::Settings;
 use crate::store::Store;
 use parking_lot::{Condvar, Mutex, RwLock};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64};
 
 #[derive(Debug, Clone, Copy)]
@@ -14,6 +18,7 @@ pub struct Schedule {
 
 pub struct AppState {
     pub store: Store,
+    pub data_dir: PathBuf,
     pub settings: RwLock<Settings>,
     pub findings: RwLock<Vec<Finding>>,
     /// Findings removed by an action, keyed by history id, so undo can bring them back.
@@ -27,15 +32,20 @@ pub struct AppState {
     pub launched_hidden: bool,
     pub shown_once: AtomicBool,
     pub watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    pub index: Arc<IndexState>,
+    pub procs: Mutex<Monitor>,
+    /// True while the Speed view is open (sample processes more often).
+    pub live_procs: AtomicBool,
 }
 
 impl AppState {
-    pub fn new(store: Store, launched_hidden: bool) -> Self {
+    pub fn new(store: Store, data_dir: PathBuf, launched_hidden: bool) -> Self {
         let settings = store.settings();
         let paused = store.get_i64("paused_until");
         let floor = settings.scan_floor_min as f64;
         AppState {
             store,
+            data_dir,
             settings: RwLock::new(settings),
             findings: RwLock::new(Vec::new()),
             acted: Mutex::new(HashMap::new()),
@@ -53,7 +63,15 @@ impl AppState {
             launched_hidden,
             shown_once: AtomicBool::new(false),
             watcher: Mutex::new(None),
+            index: Arc::new(IndexState::default()),
+            procs: Mutex::new(Monitor::new()),
+            live_procs: AtomicBool::new(false),
         }
+    }
+
+    #[cfg(test)]
+    pub fn for_tests(store: Store) -> Self {
+        Self::new(store, std::env::temp_dir(), true)
     }
 
     pub fn request_scan(&self) {
@@ -65,5 +83,17 @@ impl AppState {
     pub fn pending(&self) -> (usize, u64) {
         let f = self.findings.read();
         (f.len(), f.iter().map(|x| x.bytes).sum())
+    }
+
+    pub fn index_path(&self) -> PathBuf {
+        self.data_dir.join("index.bin")
+    }
+
+    /// Extension overrides learned from edited plans ("ext:pdf" -> folder).
+    pub fn sort_overrides(&self) -> HashMap<String, String> {
+        self.store
+            .get("sort_overrides")
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
     }
 }

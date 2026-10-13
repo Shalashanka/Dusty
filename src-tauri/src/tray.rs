@@ -6,7 +6,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager};
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Dustling", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Dusty", true, None::<&str>)?;
     let tidy = MenuItem::with_id(app, "tidy", "Look around now", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause for 3 hours", true, None::<&str>)?;
     let resume = MenuItem::with_id(app, "resume", "Resume", true, None::<&str>)?;
@@ -16,7 +16,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("app icon"))
-        .tooltip("Dustling")
+        .tooltip("Dusty")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| {
@@ -65,9 +65,9 @@ pub fn refresh(app: &AppHandle) {
     let (n, bytes) = state.pending();
     let paused = state.paused_until.load(Ordering::Relaxed) > now();
     let tip = match (paused, n) {
-        (true, _) => "Dustling · napping".to_string(),
-        (false, 0) => "Dustling · all tidy".to_string(),
-        (false, n) => format!("Dustling · {n} things to review ({})", human_bytes(bytes)),
+        (true, _) => "Dusty · napping".to_string(),
+        (false, 0) => "Dusty · all tidy".to_string(),
+        (false, n) => format!("Dusty · {n} things to review ({})", human_bytes(bytes)),
     };
     let _ = tray.set_tooltip(Some(tip));
 }

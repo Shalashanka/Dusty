@@ -15,7 +15,7 @@
 
   const DESTRUCTIVE: Action[] = ["recycle", "delete", "sweep", "empty", "archive"];
 
-  let mode = $state<"cards" | "list">(load("dustling.triage.mode", "cards"));
+  let mode = $state<"cards" | "list">(load("dusty.triage.mode", "cards"));
   let done = $state(0);
   let lastBatches = $state<string[]>([]);
   let startCount = $state(0);
@@ -41,7 +41,7 @@
   function setMode(m: "cards" | "list") {
     mode = m;
     try {
-      localStorage.setItem("dustling.triage.mode", m);
+      localStorage.setItem("dusty.triage.mode", m);
     } catch {}
   }
 

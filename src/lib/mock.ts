@@ -38,7 +38,7 @@ let findings: Finding[] = [
   f({ kind: "extracted_archive", title: "ffmpeg-7.1-full_build.zip", path: `${home}\\Downloads\\ffmpeg-7.1-full_build.zip`, ext: "zip", bytes: 180e6, confidence: 0.88, related: [`${home}\\Downloads\\ffmpeg-7.1-full_build`], origin: "https://www.gyan.dev/ffmpeg/builds/", reason: "Already extracted to the “ffmpeg-7.1-full_build” folder right next to it. The archive is a leftover." }),
   f({ kind: "backup", title: "Fije-backup-2026-09-29b.bundle", path: "C:\\dev\\Fije-backup-2026-09-29b.bundle", ext: "bundle", bytes: 96e6, confidence: 0.75, related: ["C:\\dev\\Fije"], reason: "A backup made 2 weeks ago. The original “Fije” is still right next to it." }),
   f({ kind: "big_dormant", title: "edited.zip", path: `${home}\\Videos\\edited.zip`, ext: "zip", bytes: 1.3e9, confidence: 0.5, suggested: "archive", actions: ["archive", "recycle", "keep", "snooze"], reason: "1.3 GB that hasn't been opened in 4 months. Archive it somewhere roomier, or let it go.", lastTouched: now - 130 * DAY }),
-  f({ kind: "desktop_clutter", title: "23 loose things on your desktop", path: `${home}\\Desktop`, isDir: true, items: 23, bytes: 340e6, confidence: 0.7, suggested: "sweep", actions: ["sweep", "snooze"], related: ["notes.txt", "Screenshot 2026-09-12.png", "invoice.pdf", "test.py", "mockup-v3.fig", "Untitled.png"].map((n) => `${home}\\Desktop\\${n}`), reason: "A clear desktop is a clear head. I'll move everything except shortcuts into “Swept by Dustling\\2026-10-13”. Nothing gets deleted." }),
+  f({ kind: "desktop_clutter", title: "23 loose things on your desktop", path: `${home}\\Desktop`, isDir: true, items: 23, bytes: 340e6, confidence: 0.7, suggested: "sweep", actions: ["sweep", "snooze"], related: ["notes.txt", "Screenshot 2026-09-12.png", "invoice.pdf", "test.py", "mockup-v3.fig", "Untitled.png"].map((n) => `${home}\\Desktop\\${n}`), reason: "A clear desktop is a clear head. I'll move everything except shortcuts into “Swept by Dusty\\2026-10-13”. Nothing gets deleted." }),
   f({ kind: "empty_folder", title: "New folder (3)", path: `${home}\\Downloads\\New folder (3)`, isDir: true, items: 0, confidence: 0.9, suggested: "delete", actions: ["delete", "keep", "snooze"], reason: "An empty folder, created 3 months ago and never filled." }),
 ];
 
@@ -47,7 +47,7 @@ const settings: Settings = {
   desktopDir: `${home}\\Desktop`,
   devRoots: ["C:\\dev"],
   libraryDirs: [`${home}\\Documents`, `${home}\\Pictures`, `${home}\\Videos`],
-  archiveRoot: `${home}\\Documents\\Dustling Archive`,
+  archiveRoot: `${home}\\Documents\\Dusty Archive`,
   rules: { system_junk: "auto" },
   staleDays: 30,
   installerDays: 3,

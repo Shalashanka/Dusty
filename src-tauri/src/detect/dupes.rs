@@ -29,27 +29,83 @@ const SKIP_DIRS: &[&str] = &[
     ".cache",
 ];
 
+/// Folder names that hold legitimately repeated files (games, apps, system).
+const SYSTEMISH: &[&str] = &[
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "$recycle.bin",
+    "system volume information",
+    "steamapps",
+    "steamlibrary",
+    "epic games",
+    "xboxgames",
+    "windowsapps",
+    "site-packages",
+    "miniconda3",
+    "anaconda3",
+];
+
 pub fn scan(ctx: &Ctx) -> Vec<Finding> {
     let s = ctx.s;
     let dev_roots: Vec<String> = s.dev_roots.iter().map(|d| d.to_lowercase()).collect();
-    let skip = |name: &str| SKIP_DIRS.contains(&name) || name.starts_with('.');
+    let skip = |name: &str| {
+        SKIP_DIRS.contains(&name) || SYSTEMISH.contains(&name) || name.starts_with('.')
+    };
 
     // Roots may nest (Desktop inside OneDrive...), so dedupe by path.
-    let mut roots: Vec<&String> = s.library_dirs.iter().collect();
-    roots.extend(s.inbox_dirs.iter());
-    let mut seen = HashSet::new();
+    let mut roots: Vec<String> = s
+        .library_dirs
+        .iter()
+        .chain(&s.inbox_dirs)
+        .chain(&s.watched_dirs)
+        .cloned()
+        .collect();
     let min = (s.dup_min_kb as u64 * 1024).min(s.big_mb as u64 * 1_048_576);
+    let mut seen = HashSet::new();
     let mut files: Vec<FileEntry> = Vec::new();
-    for root in roots {
-        if dev_roots.iter().any(|d| root.to_lowercase().starts_with(d)) {
-            continue;
+
+    if let Some(idx) = ctx.index.as_ref() {
+        // With the index, look at whole data drives too (not the system drive's guts).
+        let sys = std::env::var("SystemDrive")
+            .unwrap_or_else(|_| "C:".into())
+            .to_lowercase();
+        for (_, r) in &idx.roots {
+            if !r.to_lowercase().starts_with(&sys) {
+                roots.push(r.clone());
+            }
         }
-        for f in collect_files(Path::new(root), min, &skip) {
-            if seen.insert(f.path.to_string_lossy().to_lowercase()) {
-                files.push(f);
+        let scope = idx.scope(&roots, &|n: &str| skip(n));
+        for (i, e) in idx.entries.iter().enumerate() {
+            if !scope[i] || e.is_dir() || e.size < min {
+                continue;
+            }
+            let path = idx.path(i as u32);
+            let low = path.to_lowercase();
+            if dev_roots.iter().any(|d| low.starts_with(d)) || !seen.insert(low) {
+                continue;
+            }
+            files.push(FileEntry {
+                path: path.into(),
+                size: e.size,
+                created: e.mtime(),
+                touched: e.mtime(),
+            });
+        }
+    } else {
+        for root in &roots {
+            if dev_roots.iter().any(|d| root.to_lowercase().starts_with(d)) {
+                continue;
+            }
+            for f in collect_files(Path::new(root), min, &skip) {
+                if seen.insert(f.path.to_string_lossy().to_lowercase()) {
+                    files.push(f);
+                }
             }
         }
     }
+    files.retain(|f| !ctx.is_protected(&f.path.to_string_lossy()));
 
     let mut out = Vec::new();
     if s.on(Kind::BigDormant) {
@@ -139,20 +195,42 @@ fn duplicates(ctx: &Ctx, files: Vec<FileEntry>) -> Vec<Finding> {
     for (size, h, f) in headed {
         by_head.entry((size, h)).or_default().push(f);
     }
-    let full: Vec<(u64, u64, FileEntry)> = by_head
-        .into_values()
-        .filter(|g| g.len() > 1)
-        .flatten()
-        .collect::<Vec<_>>()
+    let cache = ctx.store.hashes("xxh3");
+    let mut budget: u64 = 40 << 30; // bytes read per scan
+    let mut todo = Vec::new();
+    let mut full: Vec<(u64, u64, FileEntry)> = Vec::new();
+    for f in by_head.into_values().filter(|g| g.len() > 1).flatten() {
+        let key = f.path.to_string_lossy().into_owned();
+        match cache.get(&key) {
+            Some((size, mtime, h)) if *size == f.size && *mtime == f.touched => {
+                full.push((f.size, *h, f))
+            }
+            _ if budget >= f.size => {
+                budget -= f.size;
+                todo.push(f);
+            }
+            _ => {}
+        }
+    }
+    let hashed: Vec<(u64, u64, FileEntry)> = todo
         .into_par_iter()
         .filter_map(|f| {
-            if f.size as usize <= HEAD {
-                hash_file(&f.path, Some(HEAD)).map(|h| (f.size, h, f))
+            let limit = if f.size as usize <= HEAD {
+                Some(HEAD)
             } else {
-                hash_file(&f.path, None).map(|h| (f.size, h, f))
-            }
+                None
+            };
+            hash_file(&f.path, limit).map(|h| (f.size, h, f))
         })
         .collect();
+    ctx.store.put_hashes(
+        "xxh3",
+        &hashed
+            .iter()
+            .map(|(sz, h, f)| (f.path.to_string_lossy().into_owned(), *sz, f.touched, *h))
+            .collect::<Vec<_>>(),
+    );
+    full.extend(hashed);
     let mut groups: HashMap<(u64, u64), Vec<FileEntry>> = HashMap::new();
     for (size, h, f) in full {
         groups.entry((size, h)).or_default().push(f);

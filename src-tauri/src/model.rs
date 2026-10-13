@@ -7,63 +7,95 @@ use xxhash_rust::xxh3::xxh3_64;
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Duplicate,
+    SimilarPhoto,
     Installer,
     ExtractedArchive,
     Backup,
+    StaleProject,
     DevJunk,
     BigDormant,
     StaleDownload,
+    Unsure,
     DesktopClutter,
+    FolderPlan,
     EmptyFolder,
     SystemJunk,
     RecycleBin,
+    NewStartup,
+    ResourceHog,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 11] = [
+    pub const ALL: [Kind; 17] = [
         Kind::StaleDownload,
         Kind::Installer,
         Kind::ExtractedArchive,
         Kind::Duplicate,
+        Kind::SimilarPhoto,
         Kind::DevJunk,
+        Kind::StaleProject,
         Kind::Backup,
         Kind::BigDormant,
+        Kind::Unsure,
         Kind::DesktopClutter,
+        Kind::FolderPlan,
         Kind::SystemJunk,
         Kind::RecycleBin,
         Kind::EmptyFolder,
+        Kind::NewStartup,
+        Kind::ResourceHog,
     ];
 
     pub fn key(self) -> &'static str {
         match self {
             Kind::Duplicate => "duplicate",
+            Kind::SimilarPhoto => "similar_photo",
             Kind::Installer => "installer",
             Kind::ExtractedArchive => "extracted_archive",
             Kind::Backup => "backup",
+            Kind::StaleProject => "stale_project",
             Kind::DevJunk => "dev_junk",
             Kind::BigDormant => "big_dormant",
             Kind::StaleDownload => "stale_download",
+            Kind::Unsure => "unsure",
             Kind::DesktopClutter => "desktop_clutter",
+            Kind::FolderPlan => "folder_plan",
             Kind::EmptyFolder => "empty_folder",
             Kind::SystemJunk => "system_junk",
             Kind::RecycleBin => "recycle_bin",
+            Kind::NewStartup => "new_startup",
+            Kind::ResourceHog => "resource_hog",
         }
     }
 
     pub fn noun(self) -> &'static str {
         match self {
             Kind::Duplicate => "duplicate",
+            Kind::SimilarPhoto => "near-identical photo",
             Kind::Installer => "old installer",
             Kind::ExtractedArchive => "extracted archive",
             Kind::Backup => "forgotten backup",
+            Kind::StaleProject => "sleepy project",
             Kind::DevJunk => "idle project",
             Kind::BigDormant => "big dormant file",
             Kind::StaleDownload => "stale download",
+            Kind::Unsure => "mystery folder",
             Kind::DesktopClutter => "desktop pile",
+            Kind::FolderPlan => "tidy plan",
             Kind::EmptyFolder => "empty folder",
             Kind::SystemJunk => "junk location",
             Kind::RecycleBin => "full recycle bin",
+            Kind::NewStartup => "new startup app",
+            Kind::ResourceHog => "resource hog",
         }
+    }
+
+    /// Findings that are about files on disk (and can be protected/previewed).
+    pub fn is_file_based(self) -> bool {
+        !matches!(
+            self,
+            Kind::NewStartup | Kind::ResourceHog | Kind::RecycleBin
+        )
     }
 }
 
@@ -80,6 +112,14 @@ pub enum Action {
     Sweep,
     /// Empty the Recycle Bin.
     Empty,
+    /// Zip a project to cold storage and leave a note (undoable).
+    Hibernate,
+    /// Open the organizing plan (handled by the UI).
+    Organize,
+    /// Disable a startup entry (undoable).
+    Disable,
+    /// End a process.
+    Quit,
     /// Never ask about this again.
     Keep,
     /// Ask again later.
@@ -94,9 +134,21 @@ impl Action {
             Action::Archive => "archive",
             Action::Sweep => "sweep",
             Action::Empty => "empty",
+            Action::Hibernate => "hibernate",
+            Action::Organize => "organize",
+            Action::Disable => "disable",
+            Action::Quit => "quit",
             Action::Keep => "keep",
             Action::Snooze => "snooze",
         }
+    }
+
+    /// Removes something from disk or the system.
+    pub fn is_removal(self) -> bool {
+        matches!(
+            self,
+            Action::Recycle | Action::Delete | Action::Empty | Action::Quit
+        )
     }
 }
 
@@ -122,6 +174,8 @@ pub struct Finding {
     pub ext: String,
     /// For system junk: only files older than this many days are purged.
     pub older_than_days: Option<u32>,
+    /// The program this is about (knowledge base / startup / process).
+    pub app: Option<String>,
 }
 
 impl Finding {
@@ -149,6 +203,7 @@ impl Finding {
             actions,
             ext: String::new(),
             older_than_days: None,
+            app: None,
         }
     }
 

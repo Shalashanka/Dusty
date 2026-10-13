@@ -46,13 +46,23 @@ pub fn apply(state: &AppState, ids: &[String], action: Action, auto: bool) -> Ou
         ..Default::default()
     };
     for f in targets {
-        if !f.actions.contains(&action) {
+        if !allowed(&f, action) {
             out.errors
                 .push(format!("{}: can't {} this", f.title, action.key()));
             continue;
         }
         match apply_one(state, &settings, &f, action, &out.batch, auto) {
             Ok((hid, freed, moved)) => {
+                if settings.learn && !auto {
+                    crate::learn::record(&state.store, &f, action);
+                }
+                // Caches refill; don't nag about the same spot right away.
+                if f.kind == Kind::SystemJunk && action == Action::Delete {
+                    let days = f.older_than_days.unwrap_or(7).max(7) as i64;
+                    state
+                        .store
+                        .set_decision(&f.id, &f.path, "snooze", now() + days * DAY);
+                }
                 out.done += 1;
                 out.freed += freed;
                 out.moved += moved;
@@ -63,6 +73,26 @@ pub fn apply(state: &AppState, ids: &[String], action: Action, auto: bool) -> Ou
         }
     }
     out
+}
+
+/// Whether `action` may be applied: the finding's own actions, plus Recycle
+/// and Delete as alternatives for each other on plain files and folders.
+pub fn allowed(f: &Finding, action: Action) -> bool {
+    if f.actions.contains(&action) || matches!(action, Action::Keep | Action::Snooze) {
+        return true;
+    }
+    let swappable = f.kind.is_file_based()
+        && !matches!(
+            f.kind,
+            Kind::SystemJunk | Kind::FolderPlan | Kind::DesktopClutter
+        );
+    match action {
+        Action::Delete => swappable && f.actions.contains(&Action::Recycle),
+        Action::Recycle => {
+            swappable && f.actions.contains(&Action::Delete) && f.kind != Kind::EmptyFolder
+        }
+        _ => false,
+    }
 }
 
 /// Returns (history id, bytes freed, items moved).
@@ -93,10 +123,55 @@ fn apply_one(
     match action {
         Action::Keep => {
             store.set_decision(&f.id, &f.path, "keep", 0);
+            if f.kind == Kind::NewStartup {
+                remember_startup(state, &f.path);
+            }
             Ok((store.add_history(hist), 0, 0))
         }
         Action::Snooze => {
-            store.set_decision(&f.id, &f.path, "snooze", now() + s.snooze_days as i64 * DAY);
+            let days = if f.kind == Kind::FolderPlan {
+                s.policies
+                    .iter()
+                    .find(|p| p.path.eq_ignore_ascii_case(&f.path))
+                    .map(|p| p.ask_every_days)
+                    .unwrap_or(3)
+            } else {
+                s.snooze_days
+            };
+            store.set_decision(&f.id, &f.path, "snooze", now() + days as i64 * DAY);
+            Ok((store.add_history(hist), 0, 0))
+        }
+        Action::Hibernate => {
+            let out = crate::hibernate::hibernate(path, Path::new(&s.cold_storage))?;
+            let a = out.archive.to_string_lossy().into_owned();
+            store.add_hibernated(&f.path, &a, out.original_bytes, out.files);
+            hist.dest = Some(&a);
+            hist.bytes = out.original_bytes;
+            let same_drive = a
+                .get(..2)
+                .map(|d| f.path.to_lowercase().starts_with(&d.to_lowercase()))
+                .unwrap_or(false);
+            let freed = if same_drive {
+                out.original_bytes.saturating_sub(out.archive_bytes)
+            } else {
+                out.original_bytes
+            };
+            Ok((store.add_history(hist), freed, 0))
+        }
+        Action::Organize => Err("open the plan to organize this folder".into()),
+        Action::Disable => {
+            let id = f.path.strip_prefix("startup:").ok_or("not a startup app")?;
+            crate::health::startup::set_enabled(id, false)?;
+            remember_startup(state, &f.path);
+            Ok((store.add_history(hist), 0, 0))
+        }
+        Action::Quit => {
+            hist.undoable = false;
+            let pids: Vec<u32> = f.related.iter().filter_map(|p| p.parse().ok()).collect();
+            let n = state.procs.lock().kill(&pids);
+            if n == 0 {
+                return Err("couldn't end it (already gone, or protected)".into());
+            }
             Ok((store.add_history(hist), 0, 0))
         }
         Action::Recycle => {
@@ -202,6 +277,15 @@ pub fn undo(state: &AppState, history_id: i64) -> Result<(), String> {
         }
         match r.action.as_str() {
             "keep" | "snooze" => store.clear_decision(&r.finding_id),
+            "hibernate" => {
+                let archive = r.dest.as_deref().ok_or("missing archive")?;
+                crate::hibernate::wake(Path::new(&r.path), Path::new(archive))?;
+                store.mark_restored(archive);
+            }
+            "disable" => {
+                let id = r.path.strip_prefix("startup:").ok_or("not a startup app")?;
+                crate::health::startup::set_enabled(id, true)?;
+            }
             "recycle" => restore_from_bin(&r.path)?,
             "archive" | "sweep" => {
                 let dest = r.dest.as_deref().ok_or("missing destination")?;
@@ -254,18 +338,136 @@ fn friendly(e: std::io::Error) -> String {
     }
 }
 
+fn remember_startup(state: &AppState, path: &str) {
+    let id = path.trim_start_matches("startup:").to_string();
+    let mut known: Vec<String> = state
+        .store
+        .get("startup_known")
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    if !known.contains(&id) {
+        known.push(id);
+        state.store.set(
+            "startup_known",
+            &serde_json::to_string(&known).unwrap_or_default(),
+        );
+    }
+}
+
+/// Carries out an (edited) organizing plan as one undoable batch.
+pub fn apply_plan(
+    state: &AppState,
+    folder: &str,
+    items: &[crate::organize::PlanItem],
+    original: &[crate::organize::PlanItem],
+) -> Outcome {
+    let store = &state.store;
+    let mut out = Outcome {
+        batch: new_batch(),
+        ..Default::default()
+    };
+    let mut overrides = state.sort_overrides();
+    for it in items {
+        let src = Path::new(&it.path);
+        match it.action.as_str() {
+            "leave" => {
+                let id = crate::model::finding_id(Kind::FolderPlan, &it.path);
+                store.set_decision(&id, &it.path, "keep", 0);
+            }
+            "recycle" => match trash::delete(src) {
+                Ok(()) => {
+                    store.add_history(NewHistory {
+                        action: "recycle",
+                        kind: "folder_plan",
+                        finding_id: "",
+                        title: &it.name,
+                        path: &it.path,
+                        dest: None,
+                        bytes: it.bytes,
+                        batch: &out.batch,
+                        undoable: true,
+                        auto: false,
+                    });
+                    out.done += 1;
+                    out.freed += it.bytes;
+                }
+                Err(e) => out.errors.push(format!("{}: {e}", it.name)),
+            },
+            "move" => {
+                if it.dest.is_empty() {
+                    continue;
+                }
+                let dest = unique_dest(Path::new(&it.dest), &it.name);
+                match move_path(src, &dest) {
+                    Ok(()) => {
+                        let d = dest.to_string_lossy().into_owned();
+                        store.add_history(NewHistory {
+                            action: "archive",
+                            kind: "folder_plan",
+                            finding_id: "",
+                            title: &it.name,
+                            path: &it.path,
+                            dest: Some(&d),
+                            bytes: it.bytes,
+                            batch: &out.batch,
+                            undoable: true,
+                            auto: false,
+                        });
+                        out.done += 1;
+                        out.moved += 1;
+                        // Learn: the user picked a different home for this kind of file.
+                        let was = original.iter().find(|o| o.path == it.path);
+                        if let Some(was) = was {
+                            if was.dest != it.dest && !it.is_dir {
+                                let ext = crate::walk::ext_of(src);
+                                if !ext.is_empty() {
+                                    overrides.insert(format!("ext:{ext}"), it.dest.clone());
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => out.errors.push(format!("{}: {}", it.name, friendly(e))),
+                }
+            }
+            _ => {}
+        }
+    }
+    state.store.set(
+        "sort_overrides",
+        &serde_json::to_string(&overrides).unwrap_or_default(),
+    );
+    let fid = crate::model::finding_id(Kind::FolderPlan, folder);
+    state.findings.write().retain(|f| f.id != fid);
+    out
+}
+
+/// "Don't touch this": hides findings under `path` for `days` (0 = forever).
+pub fn protect(state: &AppState, path: &str, days: u32) {
+    let until = if days == 0 {
+        0
+    } else {
+        now() + days as i64 * DAY
+    };
+    state.store.protect(path, until);
+    let low = path.trim_end_matches('\\').to_lowercase();
+    state.findings.write().retain(|f| {
+        let p = f.path.to_lowercase();
+        !(p == low || p.starts_with(&format!("{low}\\")))
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::store::Store;
 
     fn setup(name: &str) -> (AppState, PathBuf, Finding) {
-        let dir = std::env::temp_dir().join(format!("dustling-act-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dusty-act-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join(format!("{name}.txt"));
         std::fs::write(&file, b"dust").unwrap();
-        let state = AppState::new(Store::memory(), true);
+        let state = AppState::for_tests(Store::memory());
         state.settings.write().archive_root = dir.join("archive").to_string_lossy().into_owned();
         let mut f = Finding::new(
             Kind::StaleDownload,
@@ -309,9 +511,9 @@ mod tests {
     #[test]
     fn keep_suppresses_and_rejects_foreign_actions() {
         let (state, file, f) = setup("keep");
-        let out = apply(&state, &[f.id.clone()], Action::Delete, false);
+        let out = apply(&state, &[f.id.clone()], Action::Sweep, false);
         assert_eq!(out.done, 0);
-        assert!(file.exists(), "Delete is not offered for this finding");
+        assert!(file.exists(), "Sweep is not offered for this finding");
         apply(&state, &[f.id.clone()], Action::Keep, false);
         assert!(state.store.suppressed().contains(&f.id));
         std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
