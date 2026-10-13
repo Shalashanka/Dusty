@@ -15,26 +15,36 @@
 </header>
 
 <style>
+  /* Content scrolls underneath; the gradient keeps the controls readable. */
   .bar {
     position: absolute;
-    inset: 0 0 auto 0;
-    height: 40px;
+    inset: 0 0 auto 84px;
+    height: 46px;
     display: flex;
     z-index: 400;
+    background: linear-gradient(
+      to bottom,
+      var(--bg-solid) 0%,
+      color-mix(in srgb, var(--bg-solid) 85%, transparent) 45%,
+      transparent 100%
+    );
   }
   .spacer {
     flex: 1;
   }
   .controls {
     display: flex;
+    align-self: flex-start;
   }
   .controls button {
     width: 46px;
-    height: 36px;
+    height: 34px;
     display: grid;
     place-items: center;
     color: var(--text-2);
-    transition: background 0.15s, color 0.15s;
+    transition:
+      background 0.15s,
+      color 0.15s;
   }
   .controls button:hover {
     background: var(--surface-2);

@@ -1,10 +1,12 @@
 <script lang="ts">
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import { ArrowRight, RefreshCw, HardDrive, Sparkles, Flame, CalendarCheck, Leaf } from "@lucide/svelte";
+  import { ArrowRight, RefreshCw, HardDrive, Sparkles, Flame, CalendarCheck, Leaf, Trash2, Search, Database } from "@lucide/svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import Mascot, { type Mood } from "$lib/components/Mascot.svelte";
   import Counter from "$lib/components/Counter.svelte";
   import Ring from "$lib/components/Ring.svelte";
+  import DriveChips from "$lib/components/DriveChips.svelte";
   import { app } from "$lib/app.svelte";
   import { api, type Kind, type Finding } from "$lib/api";
   import { KINDS, KIND_ORDER } from "$lib/kinds";
@@ -15,20 +17,40 @@
   );
   const minutes = $derived(Math.max(1, Math.ceil((app.findings.length * 3) / 60)));
   const groups = $derived(KIND_ORDER.filter((k) => app.byKind.get(k)?.length).map((k) => [k, app.byKind.get(k)!] as const));
+  const shownDrives = $derived(
+    app.drive === "all" ? app.drives : app.drives.filter((d) => d.mount.toUpperCase().startsWith(app.drive)),
+  );
+  const totals = $derived(
+    shownDrives.reduce((a, d) => ({ total: a.total + d.total, free: a.free + d.free }), { total: 0, free: 0 }),
+  );
 
-  let confirming = $state<Kind | null>(null);
+  let confirming = $state<string | null>(null);
   let confirmTimer: ReturnType<typeof setTimeout>;
+  function arm(key: string): boolean {
+    if (confirming === key) {
+      confirming = null;
+      return true;
+    }
+    confirming = key;
+    clearTimeout(confirmTimer);
+    confirmTimer = setTimeout(() => (confirming = null), 3000);
+    return false;
+  }
 
   async function cleanAll(kind: Kind, list: Finding[]) {
-    if (confirming !== kind) {
-      confirming = kind;
-      clearTimeout(confirmTimer);
-      confirmTimer = setTimeout(() => (confirming = null), 3000);
-      return;
+    if (!arm(kind)) return;
+    await app.removeSmart(list);
+  }
+
+  async function emptyBin() {
+    if (!arm("bin")) return;
+    try {
+      const freed = await api.emptyBin();
+      app.toast(`Recycle Bin emptied · ${bytes(freed)} freed`, { tone: "ok" });
+      app.refreshDisks();
+    } catch (e) {
+      app.toast(String(e), { tone: "error" });
     }
-    confirming = null;
-    const byAction = Map.groupBy(list, (f) => f.suggested);
-    for (const [action, items] of byAction) await app.act(items, action);
   }
 
   async function lookNow() {
@@ -40,20 +62,20 @@
 <div class="home scroll">
   <section class="hero" in:fade={{ duration: 300 }}>
     <div class="mascot-wrap">
-      <Mascot {mood} size={176} />
+      <Mascot {mood} size={180} />
     </div>
     <div class="copy">
       <p class="hello">{greeting()}.</p>
       {#key mood + app.phase}
-        <h1 in:fly={{ y: 10, duration: 400, easing: cubicOut }}>
+        <h1 in:fly={{ y: 8, duration: 400, easing: cubicOut }}>
           {#if app.scanning}
             {app.phase || "Looking around"}<span class="dots"><i>.</i><i>.</i><i>.</i></span>
           {:else if app.paused}
             Napping until {clock(app.snap!.pausedUntil)}.
           {:else if app.findings.length}
-            I found {plural(app.findings.length, "thing")} you probably don't need.
+            I found {plural(app.findings.length, "thing")} you probably don't need{app.drive !== "all" ? ` on ${app.drive}` : ""}.
           {:else}
-            Everything looks tidy.
+            Everything looks tidy{app.drive !== "all" ? ` on ${app.drive}` : ""}.
           {/if}
         </h1>
       {/key}
@@ -85,15 +107,46 @@
     </div>
   </section>
 
+  <div class="scope">
+    <h2 class="section-title">Your drives</h2>
+    <DriveChips />
+  </div>
+
+  <section class="drives">
+    {#each shownDrives as d, i (d.mount)}
+      {@const used = 1 - d.free / d.total}
+      <button
+        class="drive card"
+        in:fly={{ y: 14, duration: 450, delay: 60 + i * 50, easing: cubicOut }}
+        onclick={() => {
+          app.drive = d.mount.replace(/\\$/, "").toUpperCase();
+        }}
+        ondblclick={() => app.go("space")}
+        title="Click to focus on this drive, double-click to explore it"
+      >
+        <div class="ring">
+          <Ring value={used} size={58} stroke={6} color={used > 0.9 ? "var(--danger)" : used > 0.75 ? "var(--warn)" : "var(--accent)"} />
+          <span class="pct tabular">{Math.round(used * 100)}%</span>
+        </div>
+        <div class="drive-info">
+          <b><HardDrive size={14} /> {d.mount.replace(/\\$/, "")}{d.name ? ` · ${d.name}` : ""}</b>
+          <span class="muted"><Counter value={d.free} kind="bytes" /> free of {bytes(d.total)}</span>
+          <span class="faint small">{d.kind === "unknown" ? "" : d.kind.toUpperCase()} {d.fs}</span>
+        </div>
+      </button>
+    {/each}
+  </section>
+
   <section class="stats">
     {#each [
       { label: "Ready to free", value: app.pendingBytes, icon: Sparkles, kind: "bytes" as const },
+      { label: app.drive === "all" ? "Free on all drives" : `Free on ${app.drive}`, value: totals.free, icon: HardDrive, kind: "bytes" as const },
       { label: "Freed this week", value: app.snap?.stats.freedWeek ?? 0, icon: Leaf, kind: "bytes" as const },
       { label: "Freed all-time", value: app.snap?.stats.freedTotal ?? 0, icon: Flame, kind: "bytes" as const },
       { label: "Tidy streak", value: app.snap?.stats.streakDays ?? 0, icon: CalendarCheck, kind: "number" as const, unit: "days" },
     ] as s, i (s.label)}
       {@const Icon = s.icon}
-      <div class="stat card" in:fly={{ y: 14, duration: 450, delay: 60 + i * 50, easing: cubicOut }}>
+      <div class="stat card" in:fly={{ y: 14, duration: 450, delay: 100 + i * 40, easing: cubicOut }}>
         <span class="stat-icon"><Icon size={16} /></span>
         <span class="stat-value"><Counter value={s.value} kind={s.kind} />{#if s.unit}<small> {s.unit}</small>{/if}</span>
         <span class="stat-label faint">{s.label}</span>
@@ -101,24 +154,36 @@
     {/each}
   </section>
 
-  {#if app.drives.length}
-    <section class="drives">
-      {#each app.drives as d, i (d.mount)}
-        {@const used = 1 - d.free / d.total}
-        <div class="drive card" in:fly={{ y: 14, duration: 450, delay: 120 + i * 50, easing: cubicOut }}>
-          <div class="ring">
-            <Ring value={used} size={58} stroke={6} color={used > 0.9 ? "var(--danger)" : used > 0.75 ? "var(--warn)" : "var(--accent)"} />
-            <span class="pct tabular">{Math.round(used * 100)}%</span>
-          </div>
-          <div class="drive-info">
-            <b><HardDrive size={14} /> {d.mount.replace(/\\$/, "")} {d.name ? `· ${d.name}` : ""}</b>
-            <span class="muted">{bytes(d.free)} free of {bytes(d.total)}</span>
-            <span class="faint small">{d.kind === "unknown" ? "" : d.kind.toUpperCase()} {d.fs}</span>
-          </div>
+  <section class="side-cards">
+    {#if app.bin[0] > 0}
+      <div class="card info-card" in:fly={{ y: 14, duration: 450, delay: 140, easing: cubicOut }}>
+        <span class="ic bin"><Trash2 size={18} /></span>
+        <div>
+          <b>{bytes(app.bin[0])} in the Recycle Bin</b>
+          <span class="faint">{plural(app.bin[1], "item")}. Recycled files keep using space until the bin is emptied.</span>
         </div>
-      {/each}
-    </section>
-  {/if}
+        <button class="btn sm {confirming === 'bin' ? 'danger' : ''}" onclick={emptyBin}>
+          {confirming === "bin" ? "Sure? Permanent" : "Empty bin"}
+        </button>
+      </div>
+    {/if}
+    <div class="card info-card" in:fly={{ y: 14, duration: 450, delay: 180, easing: cubicOut }}>
+      <span class="ic idx"><Database size={18} /></span>
+      <div>
+        {#if app.index?.building}
+          <b>Indexing your drives… {app.index.progress.toLocaleString()} files</b>
+          <span class="faint">Low priority, in the background. Search and Space get instant when it's done.</span>
+        {:else if app.index?.ready}
+          <b>{app.index.entries.toLocaleString()} files indexed</b>
+          <span class="faint">Updated {ago(app.index.builtAt)} · press <span class="kbd">{app.settings?.searchHotkey}</span> anywhere to search</span>
+        {:else}
+          <b>No index yet</b>
+          <span class="faint">I'll build one next time you step away.</span>
+        {/if}
+      </div>
+      <button class="btn sm" onclick={() => invoke("toggle_search")}><Search size={14} /> Search</button>
+    </div>
+  </section>
 
   {#if groups.length}
     <h2 class="section-title">What I found</h2>
@@ -130,7 +195,7 @@
         <div
           class="kind card"
           style="--c:{meta.color}"
-          in:fly={{ y: 18, duration: 500, delay: 160 + i * 45, easing: cubicOut }}
+          in:fly={{ y: 18, duration: 500, delay: 160 + i * 40, easing: cubicOut }}
           role="button"
           tabindex="0"
           onclick={() => app.go("triage", kind)}
@@ -140,7 +205,7 @@
             <span class="kind-icon"><Icon size={18} /></span>
             <span class="kind-count chip">{list.length}</span>
           </div>
-          <div class="kind-size"><Counter value={total} kind="bytes" /></div>
+          <div class="kind-size">{#if total}<Counter value={total} kind="bytes" />{:else}{list.length} {list.length === 1 ? "item" : "items"}{/if}</div>
           <div class="kind-label">{meta.label}</div>
           <div class="kind-preview faint">
             {#each list.slice(0, 2) as f (f.id)}<span class="ellipsis">{f.title}</span>{/each}
@@ -148,11 +213,8 @@
           <div class="kind-foot">
             <button class="btn sm ghost" onclick={(e) => { e.stopPropagation(); app.go("triage", kind); }}>Review</button>
             {#if meta.bulk}
-              <button
-                class="btn sm {confirming === kind ? 'danger' : ''}"
-                onclick={(e) => { e.stopPropagation(); cleanAll(kind, list); }}
-              >
-                {confirming === kind ? "Sure? Click again" : `Clean all`}
+              <button class="btn sm {confirming === kind ? 'danger' : ''}" onclick={(e) => { e.stopPropagation(); cleanAll(kind, list); }}>
+                {confirming === kind ? "Sure? Click again" : "Clean all"}
               </button>
             {/if}
           </div>
@@ -165,13 +227,13 @@
 <style>
   .home {
     height: 100%;
-    padding: 28px 40px 60px;
+    padding: 34px 40px 60px;
   }
   .hero {
     display: flex;
     align-items: center;
-    gap: 32px;
-    padding: 10px 0 26px;
+    gap: 30px;
+    padding: 0 0 22px;
   }
   .mascot-wrap {
     flex: none;
@@ -237,15 +299,24 @@
       opacity: 1;
     }
   }
+  .scope {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 4px 0 12px;
+  }
+  .scope .section-title {
+    margin: 0;
+  }
 
   .stats {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
-    margin-bottom: 12px;
+    margin: 12px 0;
   }
   .stat {
-    padding: 16px 18px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -256,7 +327,7 @@
   }
   .stat-value {
     font-family: var(--font-display);
-    font-size: 26px;
+    font-size: 24px;
     font-weight: 600;
     letter-spacing: -0.02em;
   }
@@ -279,6 +350,14 @@
     align-items: center;
     gap: 14px;
     padding: 14px 16px;
+    text-align: left;
+    transition:
+      border-color 0.2s,
+      transform 0.2s var(--ease);
+  }
+  .drive:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-2px);
   }
   .ring {
     position: relative;
@@ -305,10 +384,48 @@
   .small {
     font-size: 11.5px;
   }
+  .side-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 12px;
+  }
+  .info-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .info-card > div {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    font-size: 12.5px;
+  }
+  .info-card b {
+    font-size: 14px;
+  }
+  .ic {
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+  }
+  .ic.bin {
+    color: var(--danger);
+    background: var(--danger-soft);
+  }
+  .ic.idx {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
 
   .section-title {
     font-size: 17px;
-    margin: 30px 0 12px;
+    margin: 28px 0 12px;
   }
   .kinds {
     display: grid;
@@ -383,9 +500,9 @@
     gap: 6px;
     margin-top: auto;
   }
-  @media (max-width: 1100px) {
+  @media (max-width: 1150px) {
     .stats {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(3, 1fr);
     }
   }
 </style>

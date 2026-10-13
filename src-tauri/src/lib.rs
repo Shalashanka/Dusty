@@ -177,6 +177,7 @@ pub fn run() {
             commands::open_in_dusty,
             commands::dev_action,
             commands::app_info,
+            commands::toggle_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dusty");

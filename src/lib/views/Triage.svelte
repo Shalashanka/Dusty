@@ -1,48 +1,53 @@
 <script lang="ts">
   import { fly, fade, scale } from "svelte/transition";
   import { cubicOut, backOut } from "svelte/easing";
-  import { flip } from "svelte/animate";
-  import { LayoutGrid, List, Undo2, ArrowLeft } from "@lucide/svelte";
+  import { LayoutGrid, List, Undo2, ArrowLeft, ChevronDown, Trash2, Flame, Heart, AlarmClock, Sparkles, FolderOpen, ExternalLink } from "@lucide/svelte";
   import FindingCard from "$lib/components/FindingCard.svelte";
-  import FileGlyph from "$lib/components/FileGlyph.svelte";
+  import Preview from "$lib/components/Preview.svelte";
   import Mascot from "$lib/components/Mascot.svelte";
   import Confetti from "$lib/components/Confetti.svelte";
   import Counter from "$lib/components/Counter.svelte";
-  import { app } from "$lib/app.svelte";
+  import DriveChips from "$lib/components/DriveChips.svelte";
+  import { app, driveOf } from "$lib/app.svelte";
   import { api, type Action, type Finding, type Kind } from "$lib/api";
-  import { ACTIONS, KINDS, KIND_ORDER } from "$lib/kinds";
-  import { age, bytes, shortPath } from "$lib/format";
+  import { ACTIONS, DESTRUCTIVE, KINDS, KIND_ORDER, categoryOf } from "$lib/kinds";
+  import { age, bytes, shortPath, parent } from "$lib/format";
+  import { menu } from "$lib/menu.svelte";
 
-  const DESTRUCTIVE: Action[] = ["recycle", "delete", "sweep", "empty", "archive"];
+  type GroupBy = "none" | "type" | "kind" | "folder" | "drive";
 
-  let mode = $state<"cards" | "list">(load("dusty.triage.mode", "cards"));
+  let mode = $state<"cards" | "list">(load("dusty.triage.mode", new URLSearchParams(location.search).get("mode") ?? "cards") as "cards" | "list");
+  let groupBy = $state<GroupBy>(load("dusty.triage.group", "type") as GroupBy);
   let done = $state(0);
   let lastBatches = $state<string[]>([]);
-  let startCount = $state(0);
+  let collapsed = $state<Set<string>>(new Set());
 
   const list = $derived(app.filter === "all" ? app.findings : app.findings.filter((f) => f.kind === app.filter));
   const top = $derived(list[0]);
   const kindsPresent = $derived(KIND_ORDER.filter((k) => app.byKind.get(k)?.length));
-  const progress = $derived(startCount ? Math.min(1, done / Math.max(startCount, done + list.length)) : 0);
+  const total = $derived(list.length + done);
+  const progress = $derived(total ? done / total : 0);
 
-  $effect(() => {
-    // Remember the size of the pile when a session starts or the filter changes.
-    app.filter;
-    startCount = list.length + done;
-  });
-
-  function load<T>(k: string, d: T): T {
+  function load(k: string, d: string): string {
     try {
-      return (localStorage.getItem(k) as T) ?? d;
+      return localStorage.getItem(k) ?? d;
     } catch {
       return d;
     }
   }
+  function save(k: string, v: string) {
+    try {
+      localStorage.setItem(k, v);
+    } catch {}
+  }
   function setMode(m: "cards" | "list") {
     mode = m;
-    try {
-      localStorage.setItem("dusty.triage.mode", m);
-    } catch {}
+    save("dusty.triage.mode", m);
+  }
+  function setGroup(g: GroupBy) {
+    groupBy = g;
+    collapsed = new Set();
+    save("dusty.triage.group", g);
   }
 
   function primaryOf(f: Finding): Action {
@@ -75,7 +80,11 @@
   }
 
   async function decide(f: Finding | undefined, action: Action) {
-    if (!f || busy || !f.actions.includes(action)) return;
+    if (!f || busy) return;
+    if (action === "organize") {
+      app.planFolder = f.path;
+      return;
+    }
     busy = true;
     exitDir = action === "keep" ? 1 : action === "snooze" ? 0 : -1;
     const out = await app.act([f], action, true);
@@ -84,7 +93,7 @@
     busy = false;
     if (out && out.done) {
       done++;
-      if (!["delete", "empty"].includes(action)) lastBatches = [...lastBatches.slice(-30), out.batch];
+      if (!["delete", "empty", "quit"].includes(action)) lastBatches = [...lastBatches.slice(-30), out.batch];
     }
   }
 
@@ -97,7 +106,7 @@
   }
 
   function down(e: PointerEvent) {
-    if ((e.target as HTMLElement).closest("button")) return;
+    if ((e.target as HTMLElement).closest("button, video, audio, iframe, pre")) return;
     dragging = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -121,10 +130,10 @@
   }
 
   function onkey(e: KeyboardEvent) {
-    if (app.view !== "triage" || app.paletteOpen) return;
+    if (app.view !== "triage" || app.paletteOpen || app.planFolder || menu.open) return;
     if ((e.target as HTMLElement)?.closest("input, select, textarea")) return;
     const k = e.key.toLowerCase();
-    if (k === "z" || (e.ctrlKey && k === "z")) {
+    if (k === "z") {
       e.preventDefault();
       undoLast();
       return;
@@ -142,13 +151,18 @@
       s: "snooze",
       a: f.actions.includes("archive") ? "archive" : null,
     };
-    if (k === "o" || k === " ") {
+    if (k === "o") {
       e.preventDefault();
       api.reveal(f.path);
       return;
     }
+    if (k === "enter" && !f.isDir) {
+      e.preventDefault();
+      api.openFile(f.path);
+      return;
+    }
     const a = map[k];
-    if (a) {
+    if (a && (f.actions.includes(a) || a === "snooze")) {
       e.preventDefault();
       decide(f, a);
     }
@@ -157,27 +171,81 @@
   // ---- list mode ---------------------------------------------------------
   let selected = $state<Set<string>>(new Set());
   const selItems = $derived(list.filter((f) => selected.has(f.id)));
-  const common = $derived.by(() => {
-    if (!selItems.length) return [] as Action[];
-    return (Object.keys(ACTIONS) as Action[]).filter((a) => selItems.every((f) => f.actions.includes(a)));
+  const selBytes = $derived(selItems.reduce((a, f) => a + f.bytes, 0));
+  const canRecycle = $derived(selItems.length > 0 && selItems.every((f) => f.actions.includes("recycle") || f.actions.includes("delete")) && selItems.every((f) => !["system_junk", "folder_plan", "desktop_clutter", "recycle_bin", "new_startup", "resource_hog"].includes(f.kind)));
+  const canDelete = $derived(selItems.length > 0 && selItems.every((f) => f.actions.includes("delete") || f.actions.includes("recycle")) && selItems.every((f) => !["folder_plan", "desktop_clutter", "recycle_bin", "new_startup", "resource_hog"].includes(f.kind)));
+
+  function keyOf(f: Finding): string {
+    switch (groupBy) {
+      case "type":
+        if (f.kind === "system_junk") return "Caches & temp";
+        if (f.kind === "new_startup" || f.kind === "resource_hog" || f.kind === "recycle_bin") return KINDS[f.kind].label;
+        return categoryOf(f.ext, f.isDir);
+      case "kind":
+        return KINDS[f.kind].label;
+      case "folder":
+        return shortPath(parent(f.path), app.home);
+      case "drive":
+        return driveOf(f.path) || "System";
+      default:
+        return "";
+    }
+  }
+  const groups = $derived.by(() => {
+    if (groupBy === "none") return [["", list]] as [string, Finding[]][];
+    const m = new Map<string, Finding[]>();
+    for (const f of list) {
+      const k = keyOf(f);
+      m.set(k, [...(m.get(k) ?? []), f]);
+    }
+    return [...m.entries()].sort((a, b) => b[1].reduce((s, f) => s + f.bytes, 0) - a[1].reduce((s, f) => s + f.bytes, 0));
   });
+
   function toggle(id: string) {
     const s = new Set(selected);
     s.has(id) ? s.delete(id) : s.add(id);
     selected = s;
   }
-  function toggleAll() {
-    selected = selected.size === list.length ? new Set() : new Set(list.map((f) => f.id));
+  function toggleMany(items: Finding[]) {
+    const all = items.every((f) => selected.has(f.id));
+    const s = new Set(selected);
+    for (const f of items) all ? s.delete(f.id) : s.add(f.id);
+    selected = s;
   }
-  async function bulk(a: Action) {
+  function toggleCollapse(k: string) {
+    const s = new Set(collapsed);
+    s.has(k) ? s.delete(k) : s.add(k);
+    collapsed = s;
+  }
+  async function bulk(a: Action | "smart") {
     const items = selItems;
     selected = new Set();
+    if (a === "smart") {
+      await app.removeSmart(items);
+      done += items.length;
+      return;
+    }
     const out = await app.act(items, a);
     if (out?.done) done += out.done;
   }
   function chipFilter(k: Kind | "all") {
     app.filter = k;
     selected = new Set();
+  }
+  function rowMenu(e: MouseEvent, f: Finding) {
+    menu.show(e, [
+      { label: "Open", icon: ExternalLink, run: () => api.openFile(f.path), disabled: f.isDir && f.kind !== "unsure" },
+      { label: "Show in folder", icon: FolderOpen, run: () => api.reveal(f.path) },
+      { divider: true },
+      ...f.actions.map((a) => ({ label: ACTIONS[a].label, icon: ACTIONS[a].icon, danger: ACTIONS[a].tone === "danger", run: () => decideList(f, a) })),
+      { divider: true },
+      { label: "Don't touch for a month", run: () => app.protect(f.path, 30, `“${f.title}”`) },
+      { label: "Never touch this", run: () => app.protect(f.path, 0, `“${f.title}”`) },
+    ]);
+  }
+  function decideList(f: Finding, a: Action) {
+    if (a === "organize") app.planFolder = f.path;
+    else app.act([f], a);
   }
 </script>
 
@@ -196,6 +264,7 @@
         </button>
       {/each}
     </div>
+    <DriveChips />
     <div class="modes">
       <button class:on={mode === "cards"} onclick={() => setMode("cards")} title="One at a time (L)"><LayoutGrid size={16} /></button>
       <button class:on={mode === "list"} onclick={() => setMode("list")} title="List (L)"><List size={16} /></button>
@@ -205,7 +274,7 @@
   {#if !list.length}
     <div class="empty" in:fade={{ duration: 300 }}>
       {#if done > 0}<Confetti />{/if}
-      <div in:scale={{ start: 0.7, duration: 600, easing: backOut }}>
+      <div in:scale={{ start: 0.8, duration: 600, easing: backOut }}>
         <Mascot mood="happy" size={170} />
       </div>
       <h1>{done > 0 ? "Squeaky clean!" : "Nothing to tidy here"}</h1>
@@ -233,7 +302,7 @@
           <div
             class="slot"
             role="group"
-            class:top={i === 0}
+            class:front={i === 0}
             class:dragging={i === 0 && dragging}
             style="--i:{i}; {i === 0 ? `transform: translate(${dx}px, ${dy * 0.15}px) rotate(${dx / 22}deg)` : ''}"
             onpointerdown={i === 0 ? down : undefined}
@@ -243,7 +312,7 @@
             out:flyAway
             in:fly={{ y: 40, duration: 350, easing: cubicOut }}
           >
-            <FindingCard {f} primary={primaryOf(f)} secondary={secondaryOf(f)} dx={i === 0 ? dx : 0} onact={(a) => decide(f, a)} />
+            <FindingCard {f} primary={primaryOf(f)} secondary={secondaryOf(f)} dx={i === 0 ? dx : 0} active={i === 0} onact={(a) => decide(f, a)} />
           </div>
         {/each}
       </div>
@@ -259,43 +328,67 @@
           <span><span class="kbd">←</span> / drag left to remove</span>
           <span><span class="kbd">→</span> keep</span>
           <span><span class="kbd">↓</span> later</span>
-          <span><span class="kbd">O</span> show in Explorer</span>
+          <span><span class="kbd">Enter</span> open</span>
+          <span><span class="kbd">O</span> show in folder</span>
         </div>
       </div>
     </div>
   {:else}
-    <div class="list scroll">
-      <div class="lhead">
-        <input type="checkbox" checked={selected.size === list.length && list.length > 0} onchange={toggleAll} />
-        <span>{selected.size ? `${selected.size} selected · ${bytes(selItems.reduce((a, f) => a + f.bytes, 0))}` : `${list.length} items`}</span>
+    <div class="list-head">
+      <input type="checkbox" checked={selected.size === list.length && list.length > 0} onchange={() => toggleMany(list)} />
+      <span class="muted">{selected.size ? `${selected.size} selected · ${bytes(selBytes)}` : `${list.length} items · ${bytes(list.reduce((a, f) => a + f.bytes, 0))}`}</span>
+      <span class="sp"></span>
+      <span class="faint">Group by</span>
+      <div class="seg">
+        {#each [["type", "Type"], ["kind", "Reason"], ["folder", "Folder"], ["drive", "Drive"], ["none", "None"]] as [g, label] (g)}
+          <button class:on={groupBy === g} onclick={() => setGroup(g as GroupBy)}>{label}</button>
+        {/each}
       </div>
-      {#each list as f (f.id)}
-        <div class="lrow" class:sel={selected.has(f.id)} animate:flip={{ duration: 300 }} out:fly={{ x: -60, duration: 250 }}>
-          <input type="checkbox" checked={selected.has(f.id)} onchange={() => toggle(f.id)} />
-          <FileGlyph ext={f.ext} isDir={f.isDir} size={34} color={f.kind === "system_junk" || f.kind === "dev_junk" ? KINDS[f.kind].color : ""} />
-          <button class="lname" onclick={() => toggle(f.id)}>
-            <b class="ellipsis">{f.title}</b>
-            <span class="ellipsis faint mono">{shortPath(f.path, app.home)}</span>
-          </button>
-          <span class="lkind" style="--c:{KINDS[f.kind].color}"><i class="dot"></i>{KINDS[f.kind].short}</span>
-          <span class="lage faint">{f.lastTouched ? age(f.lastTouched) : ""}</span>
-          <span class="lsize tabular">{bytes(f.bytes)}</span>
-          <span class="lacts">
-            {#each [primaryOf(f), secondaryOf(f)].filter(Boolean) as a (a)}
-              {@const I = ACTIONS[a!].icon}
-              <button class="icon-btn {ACTIONS[a!].tone}" title={ACTIONS[a!].label} onclick={() => app.act([f], a!)}><I size={15} /></button>
-            {/each}
-          </span>
-        </div>
+    </div>
+    <div class="list scroll">
+      {#each groups as [g, items] (g)}
+        {#if g}
+          {@const all = items.every((f) => selected.has(f.id))}
+          <div class="ghead">
+            <input type="checkbox" checked={all} onchange={() => toggleMany(items)} />
+            <button class="gtitle" onclick={() => toggleCollapse(g)}>
+              <span class="chev" class:closed={collapsed.has(g)}><ChevronDown size={15} /></span>
+              <b class="ellipsis">{g}</b>
+              <span class="faint">{items.length} · {bytes(items.reduce((a, f) => a + f.bytes, 0))}</span>
+            </button>
+          </div>
+        {/if}
+        {#if !collapsed.has(g)}
+          {#each items as f (f.id)}
+            <div class="lrow" class:sel={selected.has(f.id)} oncontextmenu={(e) => rowMenu(e, f)} role="row" tabindex="-1" out:fly={{ x: -60, duration: 250 }}>
+              <input type="checkbox" checked={selected.has(f.id)} onchange={() => toggle(f.id)} />
+              <Preview path={f.path} ext={f.ext} isDir={f.isDir} size={34} color={f.kind === "system_junk" || f.kind === "dev_junk" ? KINDS[f.kind].color : ""} />
+              <button class="lname" onclick={() => toggle(f.id)} ondblclick={() => (f.isDir ? api.reveal(f.path) : api.openFile(f.path))}>
+                <b class="ellipsis">{f.title}</b>
+                <span class="ellipsis faint mono">{shortPath(f.path, app.home)}</span>
+              </button>
+              <span class="lkind" style="--c:{KINDS[f.kind].color}"><i class="dot"></i>{KINDS[f.kind].short}</span>
+              <span class="lage faint">{f.lastTouched ? age(f.lastTouched) : ""}</span>
+              <span class="lsize tabular">{bytes(f.bytes)}</span>
+              <span class="lacts">
+                {#each [primaryOf(f), secondaryOf(f)].filter(Boolean) as a (a)}
+                  {@const I = ACTIONS[a!].icon}
+                  <button class="icon-btn {ACTIONS[a!].tone}" title={ACTIONS[a!].label} onclick={() => decideList(f, a!)}><I size={15} /></button>
+                {/each}
+              </span>
+            </div>
+          {/each}
+        {/if}
       {/each}
     </div>
     {#if selItems.length}
       <div class="bulk" transition:fly={{ y: 40, duration: 300, easing: cubicOut }}>
-        <span><b>{selItems.length}</b> selected</span>
-        {#each common as a (a)}
-          {@const I = ACTIONS[a].icon}
-          <button class="btn sm {ACTIONS[a].tone === 'danger' ? 'danger' : ''}" onclick={() => bulk(a)}><I size={14} /> {ACTIONS[a].label}</button>
-        {/each}
+        <span><b>{selItems.length}</b> · {bytes(selBytes)}</span>
+        <button class="btn sm primary" onclick={() => bulk("smart")} title="Each item gets its own best removal: recycle, delete for good (caches), sweep..."><Sparkles size={14} /> Remove</button>
+        {#if canRecycle}<button class="btn sm" onclick={() => bulk("recycle")} title={ACTIONS.recycle.hint}><Trash2 size={14} /> Recycle</button>{/if}
+        {#if canDelete}<button class="btn sm danger" onclick={() => bulk("delete")} title={ACTIONS.delete.hint}><Flame size={14} /> Delete for good</button>{/if}
+        <button class="btn sm" onclick={() => bulk("keep")}><Heart size={14} /> Keep</button>
+        <button class="btn sm" onclick={() => bulk("snooze")}><AlarmClock size={14} /> Later</button>
         <button class="btn sm ghost" onclick={() => (selected = new Set())}>Clear</button>
       </div>
     {/if}
@@ -307,15 +400,14 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 22px 32px 18px;
+    padding: 30px 32px 18px;
     position: relative;
   }
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     margin-bottom: 14px;
-    padding-right: 120px;
   }
   .filters {
     flex: 1;
@@ -323,6 +415,7 @@
     gap: 6px;
     overflow-x: auto;
     padding-bottom: 2px;
+    mask-image: linear-gradient(to right, black 92%, transparent);
   }
   .filters::-webkit-scrollbar {
     height: 0;
@@ -349,12 +442,14 @@
     border-radius: 50%;
     background: var(--c, var(--accent));
   }
-  .modes {
+  .modes,
+  .seg {
     display: flex;
     padding: 3px;
     border-radius: 999px;
     background: var(--surface);
     border: 1px solid var(--border);
+    flex: none;
   }
   .modes button {
     width: 34px;
@@ -364,7 +459,16 @@
     place-items: center;
     color: var(--text-2);
   }
-  .modes button.on {
+  .seg button {
+    height: 26px;
+    padding: 0 11px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .modes button.on,
+  .seg button.on {
     background: var(--surface-3);
     color: var(--text);
   }
@@ -378,23 +482,26 @@
   }
   .stack {
     position: relative;
-    width: min(680px, 100%);
+    width: min(720px, 100%);
     flex: 1;
-    max-height: 450px;
-    min-height: 360px;
-    margin-top: 8px;
+    max-height: 560px;
+    min-height: 380px;
+    margin-top: 6px;
   }
   .slot {
     position: absolute;
     inset: 0;
-    transition: transform 0.45s var(--spring), opacity 0.3s, filter 0.3s;
+    transition:
+      transform 0.45s var(--ease),
+      opacity 0.3s,
+      filter 0.3s;
     transform: translateY(calc(var(--i) * 16px)) scale(calc(1 - var(--i) * 0.045));
     transform-origin: 50% 0;
     opacity: calc(1 - var(--i) * 0.3);
     filter: blur(calc(var(--i) * 0.6px));
     pointer-events: none;
   }
-  .slot.top {
+  .slot.front {
     pointer-events: auto;
     cursor: grab;
     touch-action: none;
@@ -404,7 +511,7 @@
     cursor: grabbing;
   }
   .progress {
-    width: min(680px, 100%);
+    width: min(720px, 100%);
     margin-top: 40px;
     display: flex;
     flex-direction: column;
@@ -437,9 +544,10 @@
   }
   .hints {
     display: flex;
-    gap: 18px;
+    gap: 16px;
     justify-content: center;
     font-size: 12px;
+    flex-wrap: wrap;
   }
   .hints span {
     display: inline-flex;
@@ -470,30 +578,59 @@
     gap: 8px;
   }
 
-  .list {
-    flex: 1;
-    margin: 0 -8px;
-    padding: 0 8px 80px;
-  }
-  .lhead {
+  .list-head {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 12px;
-    color: var(--text-2);
+    padding: 6px 12px 10px;
     font-size: 12.5px;
+  }
+  .sp {
+    flex: 1;
+  }
+  .list {
+    flex: 1;
+    margin: 0 -8px;
+    padding: 0 8px 90px;
+  }
+  .ghead {
     position: sticky;
     top: 0;
     z-index: 1;
-    background: var(--bg-solid);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 12px;
+    margin-top: 8px;
     border-radius: var(--r);
+    background: var(--bg-solid);
+    border: 1px solid var(--border);
+  }
+  .gtitle {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    text-align: left;
+  }
+  .gtitle .faint {
+    margin-left: auto;
+    font-size: 12.5px;
+  }
+  .chev {
+    display: grid;
+    transition: transform 0.2s;
+  }
+  .chev.closed {
+    transform: rotate(-90deg);
   }
   .lrow {
     display: grid;
     grid-template-columns: auto auto minmax(0, 1fr) 110px 90px 80px auto;
     align-items: center;
     gap: 12px;
-    padding: 8px 12px;
+    padding: 7px 12px;
     border-radius: var(--r);
     transition: background 0.15s;
   }
@@ -560,6 +697,7 @@
     width: 16px;
     height: 16px;
     accent-color: var(--accent);
+    flex: none;
   }
   .bulk {
     position: absolute;
@@ -568,11 +706,13 @@
     translate: -50% 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     padding: 8px 8px 8px 18px;
     border-radius: 999px;
     background: color-mix(in srgb, var(--bg-solid) 92%, white 8%);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow);
+    white-space: nowrap;
+    z-index: 5;
   }
 </style>

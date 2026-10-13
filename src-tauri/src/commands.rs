@@ -785,3 +785,8 @@ pub fn app_info(app: AppHandle, state: State<AppState>) -> AppInfo {
         debug: cfg!(debug_assertions),
     }
 }
+
+#[tauri::command]
+pub fn toggle_search(app: AppHandle) {
+    crate::toggle_search(&app);
+}

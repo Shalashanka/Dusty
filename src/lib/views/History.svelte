@@ -1,13 +1,13 @@
 <script lang="ts">
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import { Trash2, Flame, Archive, Brush, Heart, AlarmClock, Undo2, Bot, Check } from "@lucide/svelte";
+  import { Trash2, Flame, Archive, Broom, Heart, AlarmClock, Undo2, Bot, Check, Snowflake, PowerOff, CircleStop, Sun, FolderOpen } from "@lucide/svelte";
   import Counter from "$lib/components/Counter.svelte";
   import Mascot from "$lib/components/Mascot.svelte";
   import { app } from "$lib/app.svelte";
-  import { api, type HistoryRow, type Kind } from "$lib/api";
+  import { api, type Hibernated, type HistoryRow, type Kind } from "$lib/api";
   import { KINDS } from "$lib/kinds";
-  import { bytes, clock, dayLabel, shortPath } from "$lib/format";
+  import { ago, bytes, clock, dayLabel, shortPath } from "$lib/format";
 
   let rows = $state<HistoryRow[]>([]);
   let busy = $state<number | null>(null);
@@ -17,22 +17,38 @@
     delete: Flame,
     empty: Trash2,
     archive: Archive,
-    sweep: Brush,
+    sweep: Broom,
     keep: Heart,
     snooze: AlarmClock,
+    hibernate: Snowflake,
+    disable: PowerOff,
+    quit: CircleStop,
   };
   const VERBS: Record<string, string> = {
     recycle: "Recycled",
-    delete: "Cleared",
+    delete: "Deleted for good",
     empty: "Emptied",
     archive: "Archived",
     sweep: "Swept",
     keep: "Kept",
     snooze: "Snoozed",
+    hibernate: "Hibernated",
+    disable: "Stopped autostart of",
+    quit: "Ended",
   };
+  let sleeping = $state<Hibernated[]>([]);
 
   async function load() {
-    rows = await api.history(500);
+    [rows, sleeping] = await Promise.all([api.history(500), api.hibernated()]);
+  }
+  async function wake(h: Hibernated) {
+    try {
+      await api.wakeProject(h.project, h.archive);
+      app.toast(`${h.project.split("\\").pop()} is awake again`, { tone: "ok" });
+      await load();
+    } catch (e) {
+      app.toast(String(e), { tone: "error" });
+    }
   }
   $effect(() => {
     // Reload when anything changes elsewhere.
@@ -40,12 +56,12 @@
     load();
   });
 
-  /** Sweeps produce one row per item: fold them into one entry. */
+  /** Bulk actions produce one row per item: fold each batch into one entry. */
   const entries = $derived.by(() => {
     const out: (HistoryRow & { count: number })[] = [];
     for (const r of rows) {
       const prev = out.at(-1);
-      if (prev && r.action === "sweep" && prev.action === "sweep" && prev.batch === r.batch) {
+      if (prev && prev.action === r.action && prev.batch === r.batch && r.batch) {
         prev.count++;
         continue;
       }
@@ -84,6 +100,28 @@
     <div class="card s"><span class="faint">Things kept</span><b><Counter value={app.snap?.stats.keptTotal ?? 0} /></b></div>
   </div>
 
+  {#if sleeping.some((h) => !h.restored)}
+    <h3>Hibernating projects</h3>
+    <div class="timeline">
+      {#each sleeping.filter((h) => !h.restored) as h (h.id)}
+        <div class="row hib">
+          <span class="ico archive"><Snowflake size={15} /></span>
+          <div class="what">
+            <span class="ellipsis"><b>{h.project.split("\\").pop()}</b> · {h.files.toLocaleString()} files, asleep since {ago(h.at)}</span>
+            <span class="faint ellipsis mono small">{shortPath(h.archive, app.home)}</span>
+          </div>
+          <span></span>
+          <span class="size tabular">{bytes(h.bytes)}</span>
+          <span></span>
+          <span class="act">
+            <button class="btn sm ghost" onclick={() => api.reveal(h.archive)} title="Show the zip"><FolderOpen size={13} /></button>
+            <button class="btn sm" onclick={() => wake(h)}><Sun size={13} /> Wake up</button>
+          </span>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
   {#if !entries.length}
     <div class="empty">
       <Mascot mood="idle" size={130} />
@@ -103,7 +141,7 @@
             <div class="what">
               <span class="ellipsis">
                 <b>{VERBS[r.action] ?? r.action}</b>
-                {r.count > 1 ? `${r.count} desktop items` : r.title}
+                {r.count > 1 ? `${r.count} items` : r.title}
                 {#if r.auto}<span class="auto" title="Done on autopilot"><Bot size={12} /> autopilot</span>{/if}
               </span>
               <span class="faint ellipsis mono small">{shortPath(r.dest ?? r.path, app.home)}</span>
@@ -128,7 +166,7 @@
 <style>
   .history {
     height: 100%;
-    padding: 28px 40px 60px;
+    padding: 34px 40px 60px;
   }
   h1 {
     font-size: 28px;
@@ -250,5 +288,11 @@
     flex-direction: column;
     align-items: center;
     padding: 40px;
+  }
+  .row.hib {
+    grid-template-columns: auto minmax(0, 1fr) 0 90px 0 auto;
+  }
+  .act {
+    gap: 6px;
   }
 </style>

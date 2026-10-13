@@ -1,7 +1,8 @@
 <script lang="ts">
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import { Search, House, Layers, ChartPie, History, SlidersHorizontal, RefreshCw, Pause, Play, FolderOpen, CornerDownLeft } from "@lucide/svelte";
+  import { Search, House, Layers, ChartPie, History, SlidersHorizontal, RefreshCw, Pause, Play, FolderOpen, CornerDownLeft, Gauge, Database } from "@lucide/svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { app } from "$lib/app.svelte";
   import { api, type Kind } from "$lib/api";
   import { KINDS, KIND_ORDER } from "$lib/kinds";
@@ -25,7 +26,10 @@
       { id: "home", label: "Go to Home", icon: House, run: () => app.go("home") },
       { id: "space", label: "Explore disk space", icon: ChartPie, run: () => app.go("space") },
       { id: "history", label: "Open history", icon: History, run: () => app.go("history") },
-      { id: "rules", label: "Edit rules", icon: SlidersHorizontal, run: () => app.go("rules") },
+      { id: "speed", label: "Speed up my PC", icon: Gauge, run: () => app.go("speed") },
+      { id: "rules", label: "Settings", icon: SlidersHorizontal, run: () => app.go("rules") },
+      { id: "search", label: "Search all files", hint: app.settings?.searchHotkey, icon: Search, run: () => invoke("toggle_search") },
+      { id: "reindex", label: "Rebuild the file index", icon: Database, run: () => api.indexRebuild() },
       app.paused
         ? { id: "wake", label: "Wake up", icon: Play, run: async () => { await api.pause(0); await app.refresh(); } }
         : { id: "pause", label: "Pause for 3 hours", icon: Pause, run: async () => { await api.pause(180); await app.refresh(); } },
