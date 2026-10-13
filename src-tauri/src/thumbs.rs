@@ -86,9 +86,9 @@ pub fn pixels(path: &str, size: i32, thumbnail_only: bool) -> Option<Pixels> {
 
 fn to_png(p: &Pixels) -> Option<Vec<u8>> {
     // Shell bitmaps are premultiplied BGRA; some have no alpha at all.
-    let has_alpha = p.bgra.chunks_exact(4).any(|c| c[3] != 0);
+    let has_alpha = p.bgra.as_chunks::<4>().0.iter().any(|c| c[3] != 0);
     let mut rgba = Vec::with_capacity(p.bgra.len());
-    for c in p.bgra.chunks_exact(4) {
+    for c in p.bgra.as_chunks::<4>().0 {
         let a = if has_alpha { c[3] } else { 255 };
         let un = |v: u8| {
             if a == 0 || a == 255 {

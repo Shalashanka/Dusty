@@ -417,12 +417,13 @@ pub fn apply_plan(
                         out.moved += 1;
                         // Learn: the user picked a different home for this kind of file.
                         let was = original.iter().find(|o| o.path == it.path);
-                        if let Some(was) = was {
-                            if was.dest != it.dest && !it.is_dir {
-                                let ext = crate::walk::ext_of(src);
-                                if !ext.is_empty() {
-                                    overrides.insert(format!("ext:{ext}"), it.dest.clone());
-                                }
+                        if let Some(was) = was
+                            && was.dest != it.dest
+                            && !it.is_dir
+                        {
+                            let ext = crate::walk::ext_of(src);
+                            if !ext.is_empty() {
+                                overrides.insert(format!("ext:{ext}"), it.dest.clone());
                             }
                         }
                     }

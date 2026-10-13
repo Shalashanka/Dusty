@@ -1,6 +1,6 @@
 [package]
 name = "dusty"
-version = "0.1.0"
+version = "0.2.0"
 description = "A tiny housekeeper for your PC"
 authors = ["Griseld Islamaj"]
 edition = "2024"

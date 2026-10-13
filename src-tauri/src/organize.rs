@@ -51,10 +51,12 @@ pub fn classify(path: &Path, is_dir: bool) -> (&'static str, String) {
                 }
             }
         }
-        if let Some((cat, c)) = counts.iter().max_by_key(|(_, c)| **c) {
-            if n >= 3 && *c * 10 >= n * 8 && !matches!(*cat, "other" | "folder") {
-                return (cat, format!("A folder of {c} {}.", plural(cat)));
-            }
+        if let Some((cat, c)) = counts.iter().max_by_key(|(_, c)| **c)
+            && n >= 3
+            && *c * 10 >= n * 8
+            && !matches!(*cat, "other" | "folder")
+        {
+            return (cat, format!("A folder of {c} {}.", plural(cat)));
         }
         return ("folder", "A folder of mixed things.".into());
     }

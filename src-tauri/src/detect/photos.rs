@@ -11,7 +11,9 @@ use std::path::Path;
 const EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "heic", "bmp", "tif", "tiff"];
 /// New photos hashed per scan (keeps background scans short).
 const BUDGET: usize = 1500;
-const MAX_DISTANCE: u32 = 4;
+const MAX_DISTANCE: u32 = 2;
+/// Suggestions per scan; photo libraries are personal, don't flood.
+const MAX_FINDINGS: usize = 30;
 
 pub fn scan(ctx: &Ctx) -> Vec<Finding> {
     let s = ctx.s;
@@ -107,7 +109,9 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
         members.sort_by_key(|m| std::cmp::Reverse(m.size));
         let keeper = members[0];
         for m in &members[1..] {
-            if m.size == keeper.size {
+            let name = name_of(&m.path).to_lowercase();
+            // Edited versions are intentional, and near-equal sizes are bracketed or burst shots.
+            if m.size == keeper.size || name.contains("edit") || m.size * 10 > keeper.size * 8 {
                 continue;
             }
             let p = m.path.to_string_lossy();
@@ -124,11 +128,13 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
             f.confidence = 0.55;
             f.related = vec![keeper.path.to_string_lossy().into_owned()];
             f.reason = format!(
-                "Looks almost identical to “{}”, which is bigger (probably the better copy). A resized or re-saved version, or a burst shot?",
+                "Looks almost identical to “{}”, which is much bigger (probably the original). A resized or re-saved copy?",
                 name_of(&keeper.path)
             );
             out.push(f);
         }
     }
+    out.sort_by_key(|f| std::cmp::Reverse(f.bytes));
+    out.truncate(MAX_FINDINGS);
     out
 }

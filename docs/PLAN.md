@@ -137,31 +137,56 @@ age, and for downloads the **origin URL** read from the
 
 ## 7. Roadmap
 
-**v0.1 (this iteration)**
-- Engine with detectors 1–6, 8–11, Zone.Identifier origin, installed-apps lookup.
+**v0.1 — done**
+- Engine with the core detectors, Zone.Identifier origin, installed-apps lookup.
 - Idle-aware adaptive scheduler, background I/O priority, watcher + first-seen.
-- SQLite store: decisions, history, first-seen, settings.
-- Actions: recycle / move / delete / keep / snooze + undo.
-- UI: Home, Triage, Space (treemap), History, Rules; tray; toasts; autostart.
+- SQLite store, actions with undo, Home / Tidy / Space / History / Rules, tray, toasts, autostart.
 
-**v0.2**
-- NTFS **MFT / USN-journal** indexing (admin) for whole-drive scans in
-  seconds, Everything-style, plus incremental updates without rescanning.
-- Detector 7 & 12, "big & dormant" across all drives.
-- Startup-apps audit (Run keys, Startup folder, Task Scheduler) with
-  enable/disable via `StartupApproved`; RAM-hog report.
-- Drive care: SSD/HDD detection; scheduled `defrag /O` for HDDs at idle,
-  ReTrim for SSDs; SMART warnings.
-- Toast inline actions ("Recycle all 7") without opening the window.
+**v0.2 — done**
+- Renamed to **Dusty** (mascot with broom, apron and headscarf).
+- **Whole-drive file index**: parallel walk of every drive into a compact
+  arena (~24 bytes + name per entry), saved to disk, refreshed at idle,
+  kept current between rebuilds by recursive watchers. 3.1M files in ~28 s,
+  searches in 5–20 ms.
+- **Global search popup** (`Ctrl+Alt+Space`, configurable) with a
+  natural-language parser: types, sizes, relative/absolute dates, locations.
+- **Space** rebuilt as a nested SpaceSniffer-style map, instant from the
+  index, with right-click actions and knowledge-base labels.
+- **Knowledge base** of 90+ app cache/temp/log locations with safety levels;
+  drives the junk detector and Space annotations.
+- **Speed**: startup apps (Task Manager's StartupApproved switches, admin via
+  UAC for machine-wide ones), live process monitor with leftover/hog flags,
+  drive optimize + fragmentation analysis, hibernation file, Delivery
+  Optimization, DISM component cleanup, power plans, preinstalled-app removal.
+- **Folder policies** (watch / keep empty / keep sorted) with an editable
+  organizing plan, file classifier (scripts, installers, screenshots…), and
+  learned destination overrides.
+- **Project hibernation**: zip without rebuildable junk, verify every entry's
+  CRC, replace with a note; undo extracts it back.
+- **Unsure ("What's this?")** questions for big forgotten folders; **stale
+  projects**; **near-identical photos** (dHash of shell thumbnails, cached).
+- **Protection**: don't touch a file/folder for a day/week/month/forever.
+- **Learning** from keep/remove decisions (per extension, origin, folder).
+- Toast **quick actions** ("Clean the sure ones"), **weekly digest**, new
+  startup-app and background-hog alerts.
+- Drive selector on Home, grouped list view with smart bulk removal,
+  previews (image/video/audio/PDF/text + shell thumbnails), Open / Show in
+  folder, interactive onboarding, settings tabs, About, developer mode.
 
-**v0.3+**
-- **Smart sorting**: auto-file new downloads (Installers / Archives / Docs /
-  Media) by rules you approve once.
-- Learned preferences: decisions train a per-extension/per-origin model so
-  confidence improves ("you always keep PDFs from your bank").
-- Project hibernation: zip an idle repo's working tree to cold storage,
-  leaving a stub that restores on double-click.
-- Weekly digest ("You freed 8.3 GB this week").
-- Browser integration: correlate downloads with browser history.
-- Content-aware duplicates for images (perceptual hash).
-- Windows Update leftovers / `Windows.old` / DISM component cleanup (admin).
+**v0.3 — next**
+- **NTFS MFT / USN journal** fast path when Dusty runs with an elevated
+  helper service: index rebuilds in seconds and exact incremental updates.
+  (The current index works without admin rights.)
+- **Ask Dusty**: a tiny local language model (e.g. a ~0.5–1B instruct model
+  via llama.cpp, strictly read-only tools over the index) for questions like
+  “find the contract I signed with a PDF tool sometime last spring”. The
+  rule-based parser stays as the instant first pass.
+- Lower index memory (front-coded names, mmap'd arena).
+- Scheduled Tasks and services review (third-party auto-start services).
+- SMART / drive-health warnings, temperature-aware scanning on laptops.
+- Browser download history correlation (what page a file came from).
+- Duplicate *folders* (whole trees copied twice), old VM/WSL disk images.
+- Per-app "uninstall leftovers" (AppData folders of apps no longer installed).
+- Restore-point and shadow-copy size report.
+- Quiet "focus" detection (IDE/game in foreground → defer everything).
+- Localization (Italian first).

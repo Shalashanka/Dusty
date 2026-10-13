@@ -220,37 +220,31 @@ pub fn parse(input: &str) -> Query {
         } else {
             w.parse::<f64>().ok()
         };
-        if let (Some(n), Some(days)) = (num, unit_days(next)) {
-            if next2 == "ago"
+        if let (Some(n), Some(days)) = (num, unit_days(next))
+            && (next2 == "ago"
                 || words
                     .get(i.wrapping_sub(1))
                     .map(|p| p == "last" || p == "past")
-                    .unwrap_or(false)
-            {
-                let center = t - (n * days as f64 * DAY as f64) as i64;
-                let spread = ((n * days as f64 * DAY as f64) * if fuzzy { 0.3 } else { 0.2 })
-                    .max(DAY as f64 * 2.0) as i64;
-                if next2 == "ago" {
-                    q.after = Some(center - spread);
-                    q.before = Some(center + spread);
-                    q.explain.push(format!(
-                        "{}~{} {} ago",
-                        if fuzzy { "" } else { "" },
-                        n,
-                        next
-                    ));
-                } else {
-                    q.after = Some(center);
-                    q.explain.push(format!("last {n} {next}"));
-                }
-                used[i] = true;
-                used[i + 1] = true;
-                if next2 == "ago" {
-                    used[i + 2] = true;
-                }
-                i += 3;
-                continue;
+                    .unwrap_or(false))
+        {
+            let center = t - (n * days as f64 * DAY as f64) as i64;
+            let spread = ((n * days as f64 * DAY as f64) * if fuzzy { 0.3 } else { 0.2 })
+                .max(DAY as f64 * 2.0) as i64;
+            if next2 == "ago" {
+                q.after = Some(center - spread);
+                q.before = Some(center + spread);
+                q.explain.push(format!("~{n} {next} ago"));
+            } else {
+                q.after = Some(center);
+                q.explain.push(format!("last {n} {next}"));
             }
+            used[i] = true;
+            used[i + 1] = true;
+            if next2 == "ago" {
+                used[i + 2] = true;
+            }
+            i += 3;
+            continue;
         }
         // "bigger than 2 gb", "over 500mb", "under 10 mb"
         if matches!(
@@ -285,9 +279,7 @@ pub fn parse(input: &str) -> Query {
                     num_s,
                     unit_s
                 ));
-                for k in i..=j {
-                    used[k] = true;
-                }
+                used[i..=j].iter_mut().for_each(|u| *u = true);
                 i = j + 1;
                 continue;
             }
@@ -372,16 +364,16 @@ pub fn parse(input: &str) -> Query {
                     i += 2;
                     continue;
                 }
-                if let Ok(year) = next.parse::<i64>() {
-                    if (1990..=2100).contains(&year) {
-                        q.after = Some(days_from_civil(year, 1, 1) * DAY);
-                        q.before = Some(days_from_civil(year + 1, 1, 1) * DAY);
-                        q.explain.push(format!("in {year}"));
-                        used[i] = true;
-                        used[i + 1] = true;
-                        i += 2;
-                        continue;
-                    }
+                if let Ok(year) = next.parse::<i64>()
+                    && (1990..=2100).contains(&year)
+                {
+                    q.after = Some(days_from_civil(year, 1, 1) * DAY);
+                    q.before = Some(days_from_civil(year + 1, 1, 1) * DAY);
+                    q.explain.push(format!("in {year}"));
+                    used[i] = true;
+                    used[i + 1] = true;
+                    i += 2;
+                    continue;
                 }
                 let loc = next.trim_end_matches(':').trim_end_matches('\\');
                 let known = [
@@ -425,8 +417,8 @@ pub fn parse(input: &str) -> Query {
                 q.exts.push(bare.to_string());
                 q.explain.push(format!(".{bare}"));
                 used[i] = true;
-            } else if w.starts_with("*.") {
-                q.exts.push(w[2..].to_string());
+            } else if let Some(e) = w.strip_prefix("*.") {
+                q.exts.push(e.to_string());
                 q.explain.push(w.to_string());
                 used[i] = true;
             }
@@ -496,25 +488,25 @@ impl Query {
         if self.is_empty() || (self.dirs_only && !is_dir) || (self.files_only && is_dir) {
             return None;
         }
-        if let Some(m) = self.min_size {
-            if size < m {
-                return None;
-            }
+        if let Some(m) = self.min_size
+            && size < m
+        {
+            return None;
         }
-        if let Some(m) = self.max_size {
-            if size > m || is_dir {
-                return None;
-            }
+        if let Some(m) = self.max_size
+            && (size > m || is_dir)
+        {
+            return None;
         }
-        if let Some(a) = self.after {
-            if mtime < a {
-                return None;
-            }
+        if let Some(a) = self.after
+            && mtime < a
+        {
+            return None;
         }
-        if let Some(b) = self.before {
-            if mtime > b {
-                return None;
-            }
+        if let Some(b) = self.before
+            && mtime > b
+        {
+            return None;
         }
         if !self.exts.is_empty() {
             let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");

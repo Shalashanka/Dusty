@@ -78,13 +78,13 @@ fn run(app: AppHandle) {
 fn index_loop(app: AppHandle) {
     let state = app.state::<AppState>();
     let path = state.index_path();
-    if state.settings.read().index_enabled {
-        if let Ok(idx) = crate::index::load(&path) {
-            let roots: Vec<String> = idx.roots.iter().map(|r| r.1.clone()).collect();
-            state.index.install(idx);
-            state.index.watch(&roots);
-            let _ = app.emit("index", state.index.status());
-        }
+    if state.settings.read().index_enabled
+        && let Ok(idx) = crate::index::load(&path)
+    {
+        let roots: Vec<String> = idx.roots.iter().map(|r| r.1.clone()).collect();
+        state.index.install(idx);
+        state.index.watch(&roots);
+        let _ = app.emit("index", state.index.status());
     }
     loop {
         let s = state.settings.read().clone();

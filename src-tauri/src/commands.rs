@@ -261,7 +261,7 @@ pub async fn space(path: String) -> R<SpaceResult> {
                 }
             })
             .collect();
-        children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        children.sort_by_key(|c| std::cmp::Reverse(c.bytes));
         Ok(SpaceResult {
             path: path.clone(),
             bytes: children.iter().map(|c| c.bytes).sum(),
@@ -359,10 +359,10 @@ pub async fn space_tree(
 ) -> R<crate::index::TreeNode> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        if let Some(idx) = state.index.get() {
-            if let Some(t) = crate::index::tree(&idx, &path, depth.unwrap_or(3)) {
-                return Ok(t);
-            }
+        if let Some(idx) = state.index.get()
+            && let Some(t) = crate::index::tree(&idx, &path, depth.unwrap_or(3))
+        {
+            return Ok(t);
         }
         let root = Path::new(&path);
         if !root.is_dir() {

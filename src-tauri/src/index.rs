@@ -465,10 +465,10 @@ impl IndexState {
                     _ => {}
                 }
             });
-            if let Ok(mut w) = w {
-                if w.watch(Path::new(r), RecursiveMode::Recursive).is_ok() {
-                    ws.push(w);
-                }
+            if let Ok(mut w) = w
+                && w.watch(Path::new(r), RecursiveMode::Recursive).is_ok()
+            {
+                ws.push(w);
             }
         }
         *self.watchers.lock() = ws;
@@ -627,36 +627,36 @@ pub fn tree(idx: &Index, path: &str, depth: usize) -> Option<TreeNode> {
     ) -> TreeNode {
         let e = idx.entries[i as usize];
         let mut children = Vec::new();
-        if level < levels.len() {
-            if let Some(kids) = levels[level].get(&i) {
-                let mut kids = kids.clone();
-                kids.sort_by_key(|k| std::cmp::Reverse(idx.entries[*k as usize].size));
-                let lim = limits.get(level).copied().unwrap_or(6);
-                let total = e.size.max(1);
-                let mut shown = 0;
-                let mut rest_bytes = 0u64;
-                let mut rest_n = 0u64;
-                for k in kids {
-                    let ke = &idx.entries[k as usize];
-                    if shown < lim && (shown < 3 || ke.size * 250 >= total) {
-                        children.push(node(idx, k, level + 1, levels, limits));
-                        shown += 1;
-                    } else {
-                        rest_bytes += ke.size;
-                        rest_n += 1;
-                    }
+        if level < levels.len()
+            && let Some(kids) = levels[level].get(&i)
+        {
+            let mut kids = kids.clone();
+            kids.sort_by_key(|k| std::cmp::Reverse(idx.entries[*k as usize].size));
+            let lim = limits.get(level).copied().unwrap_or(6);
+            let total = e.size.max(1);
+            let mut shown = 0;
+            let mut rest_bytes = 0u64;
+            let mut rest_n = 0u64;
+            for k in kids {
+                let ke = &idx.entries[k as usize];
+                if shown < lim && (shown < 3 || ke.size * 250 >= total) {
+                    children.push(node(idx, k, level + 1, levels, limits));
+                    shown += 1;
+                } else {
+                    rest_bytes += ke.size;
+                    rest_n += 1;
                 }
-                if rest_bytes > 0 {
-                    children.push(TreeNode {
-                        name: format!("{rest_n} smaller items"),
-                        path: String::new(),
-                        bytes: rest_bytes,
-                        files: rest_n,
-                        is_dir: false,
-                        newest: 0,
-                        children: vec![],
-                    });
-                }
+            }
+            if rest_bytes > 0 {
+                children.push(TreeNode {
+                    name: format!("{rest_n} smaller items"),
+                    path: String::new(),
+                    bytes: rest_bytes,
+                    files: rest_n,
+                    is_dir: false,
+                    newest: 0,
+                    children: vec![],
+                });
             }
         }
         TreeNode {

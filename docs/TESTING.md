@@ -1,0 +1,109 @@
+# Dusty: manual test checklist
+
+Everything requested so far, as things to try. Tick them off as you go.
+Tip: **Settings › About › tap the version 7 times** unlocks Developer mode,
+which can fire notifications, digests and scans on demand.
+
+## Install & identity
+- [ ] Uninstall the old **Dustling** (Settings › Apps), then install `Dusty_0.2.0_x64-setup.exe`
+- [ ] App, tray icon, window title and toasts all say **Dusty**; icon shows the mascot with headscarf + broom
+- [ ] Your old Dustling history/decisions carried over (History tab)
+- [ ] The old "Dustling" autostart entry is gone (Task Manager › Startup apps)
+
+## Mascot & polish
+- [ ] Mascot no longer jumps frantically on any screen (onboarding, Home, Tidy, empty states)
+- [ ] Mascot has a broom, apron and headscarf; eyes follow the mouse; blinks; sweeps while scanning; sleeps when paused
+- [ ] Title bar (minimize / maximize / close) has a gradient; scrolling content doesn't show through harshly
+- [ ] Closing the window hides Dusty to the tray; tray click reopens it
+
+## Onboarding (Developer › "Show onboarding again", then restart)
+- [ ] 5 interactive steps: hello → Downloads/Desktop rule → extra folders → search hotkey → how hands-on
+- [ ] Choosing "Keep it empty" for Downloads creates a folder policy (Settings › Folders & policies)
+- [ ] Pressing Ctrl+Alt+Space on step 4 turns the box green
+- [ ] "Bold" style puts junk/build junk/archives/empty folders on Autopilot
+
+## Home
+- [ ] Drive selector (All / C: / D: / G:) filters the headline, findings and "Free on…" stat
+- [ ] Clicking a drive card focuses it; double-click opens it in Space
+- [ ] **Free space updates right after deleting** (no rescan needed). Note: *recycled* files still use space until the bin is emptied
+- [ ] Recycle Bin card shows its size; "Empty bin" asks twice, then frees space
+- [ ] Index card shows file count / indexing progress; "Search" opens the popup
+
+## Tidy (cards)
+- [ ] Card shows preview for images, video (plays), audio, PDF, text; Windows thumbnail for others (PSD, folders…)
+- [ ] Duplicates and similar photos show **side-by-side** previews
+- [ ] **Open** and **Show in folder** buttons on the card (`Enter` / `O` work too)
+- [ ] **⋯ › Don't touch this** for a day / week / month / forever, and "the whole folder" options; item disappears, Undo in the snackbar works
+- [ ] "Delete for good (skip the bin)" in ⋯ for recyclable items
+- [ ] Swipe/drag left removes, right keeps; `←` `→` `↓` `Z` keys work
+- [ ] "What's this?" cards (unknown big old folders) read as a question
+- [ ] Sleepy project → **Hibernate**: zip appears in Cold Storage, folder replaced by `DUSTY-HIBERNATED.txt`; History › Hibernating projects › **Wake up** restores it
+- [ ] Folder plan card → "See the plan" opens the plan editor
+
+## Tidy (list)
+- [ ] Group by **Type** (e.g. all `.dll`s together), Reason, Folder, Drive, None
+- [ ] Group checkbox selects the whole group; groups collapse
+- [ ] Bulk bar **always** offers Remove / Recycle / Delete for good / Keep / Later (no disappearing delete button)
+- [ ] "Remove" handles a mixed selection (caches deleted for good, files recycled, …)
+- [ ] Right-click a row: Open, Show in folder, actions, Don't touch
+- [ ] Recycle vs Delete for good: hover shows the difference (bin + undo vs permanent + immediate space)
+
+## Organizing plans (folder policies)
+- [ ] Settings › Folders & policies: add a folder, set "Keep empty" or "Keep sorted", grace period, ask-every
+- [ ] A `.bat`/`.ps1` lands in Scripts; installers already installed → Recycle; zips already extracted → Recycle; screenshots → Pictures\Screenshots
+- [ ] Change an item's destination/action, or a whole category ("All: Move to…/Recycle/Leave")
+- [ ] "Do it" moves everything; snackbar Undo puts it all back
+- [ ] Next plan remembers the destination you picked for that file type
+- [ ] Items you chose to "Leave" aren't proposed again
+
+## Watched folders & whole system
+- [ ] Settings › "Extra folders to watch": old files there get flagged like Downloads
+- [ ] Old stuff on other drives (D:, G:) shows up (duplicates, big dormant, "What's this?")
+- [ ] Settings › "Drives I look after" toggles drives in/out of the index
+
+## Search (Ctrl+Alt+Space, anywhere in Windows)
+- [ ] Popup appears centered, on top; Esc or clicking elsewhere hides it
+- [ ] Results while typing in milliseconds; preview pane on the right
+- [ ] Natural language: "pdf invoice about 5 months ago", "big videos on d:", "screenshots last week", "budget folder in documents", `"exact name"`, "bigger than 1 gb"
+- [ ] Chips show how the query was understood
+- [ ] Enter opens, Ctrl+Enter shows in folder, Ctrl+C copies the path
+- [ ] Settings › Behavior › Search shortcut: record a different combo, it works immediately
+- [ ] A file created after indexing is still found (live watcher)
+
+## Space
+- [ ] Click a drive: nested boxes (folders inside folders) appear instantly ("Instant (indexed)")
+- [ ] Hovering the list on the right **no longer makes things jump**
+- [ ] Right-click a box: Zoom in, Open in Explorer, Copy path, Recycle, Delete for good, Don't flag
+- [ ] Known caches are labelled (green = safe, amber = careful, red = leave alone) with an explanation
+- [ ] Works on every drive, not just C:
+
+## Speed
+- [ ] Memory ring, startup count, suspicious process count
+- [ ] Startup apps toggle on/off (machine-wide ones ask for admin); matches Task Manager's Startup tab
+- [ ] Live process list updates every few seconds; leftover dev processes flagged ("End leftovers")
+- [ ] Optimize a drive (UAC) / "Check fragmentation" on the HDD shows a %
+- [ ] Hibernation off/on, Delivery Optimization clear, Component cleanup (UAC), power plan switch
+- [ ] "Find preinstalled apps" lists bloat; Remove works
+
+## Notifications (use Developer mode to trigger)
+- [ ] "Test notification" shows a Dusty toast with the icon
+- [ ] Nudge toast has **"Clean the sure ones (N, X GB)"**: pressing it cleans without opening the app, then confirms
+- [ ] "Let's look" opens Tidy; "Not now" does nothing
+- [ ] Weekly digest toast ("This week you freed …")
+- [ ] Autopilot summary toast
+- [ ] No toasts during quiet hours or fullscreen games
+
+## Smarts
+- [ ] Keep several files of the same kind (e.g. PDFs from one site) → later ones say "You usually keep…" with lower confidence
+- [ ] A new app adding itself to startup produces a "New startup apps" card
+- [ ] Clearing a cache location doesn't re-flag it immediately on the next scan
+- [ ] Knowledge base explains junk (e.g. "Adobe Premiere Pro cache · usually safe to delete")
+
+## Settings & About
+- [ ] Tabs: What I look for · Folders & policies · Behavior · Protected · About
+- [ ] Protected tab lists everything you protected; Remove brings it back next scan
+- [ ] About shows credits and **Buy me a coffee** (disabled until `coffeeUrl` is set in `src/lib/config.ts`)
+- [ ] Tapping the version 7× unlocks the **Developer** tab; it can be turned off again
+
+## Developer tab
+- [ ] Test notification · Nudge · Autopilot toast · Weekly digest · Background scan · Rebuild index · Show onboarding · Forget history · Open data folder
