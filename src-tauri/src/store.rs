@@ -1,8 +1,8 @@
 use crate::model::{HistoryRow, Stats};
 use crate::settings::Settings;
-use crate::timeutil::{now, DAY};
+use crate::timeutil::{DAY, now};
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -54,7 +54,9 @@ impl Store {
                  auto INTEGER NOT NULL DEFAULT 0);
              CREATE INDEX IF NOT EXISTS history_at ON history(at);",
         )?;
-        Ok(Store { conn: Mutex::new(conn) })
+        Ok(Store {
+            conn: Mutex::new(conn),
+        })
     }
 
     // ---- key/value -------------------------------------------------------
@@ -102,7 +104,10 @@ impl Store {
     }
 
     pub fn clear_decision(&self, id: &str) {
-        let _ = self.conn.lock().execute("DELETE FROM decisions WHERE id=?1", [id]);
+        let _ = self
+            .conn
+            .lock()
+            .execute("DELETE FROM decisions WHERE id=?1", [id]);
     }
 
     /// Finding ids that must not be shown: kept forever, or snoozed until later.
@@ -147,14 +152,15 @@ impl Store {
         let ts = now();
         if let Ok(tx) = conn.transaction() {
             {
-                let Ok(mut stmt) = tx.prepare("INSERT OR IGNORE INTO seen(id, at) VALUES(?1, ?2)") else {
+                let Ok(mut stmt) = tx.prepare("INSERT OR IGNORE INTO seen(id, at) VALUES(?1, ?2)")
+                else {
                     return fresh;
                 };
                 for id in ids {
-                    if let Ok(n) = stmt.execute(params![id, ts]) {
-                        if n > 0 {
-                            fresh.insert(id.clone());
-                        }
+                    if let Ok(n) = stmt.execute(params![id, ts])
+                        && n > 0
+                    {
+                        fresh.insert(id.clone());
                     }
                 }
             }
@@ -210,8 +216,13 @@ impl Store {
 
     pub fn history(&self, limit: u32) -> Vec<HistoryRow> {
         let conn = self.conn.lock();
-        let sql = format!("SELECT {} FROM history ORDER BY id DESC LIMIT ?1", Self::COLS);
-        let Ok(mut stmt) = conn.prepare(&sql) else { return vec![] };
+        let sql = format!(
+            "SELECT {} FROM history ORDER BY id DESC LIMIT ?1",
+            Self::COLS
+        );
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            return vec![];
+        };
         stmt.query_map([limit], Self::row)
             .map(|rows| rows.flatten().collect())
             .unwrap_or_default()
@@ -219,8 +230,13 @@ impl Store {
 
     pub fn history_by_batch(&self, batch: &str) -> Vec<HistoryRow> {
         let conn = self.conn.lock();
-        let sql = format!("SELECT {} FROM history WHERE batch=?1 ORDER BY id DESC", Self::COLS);
-        let Ok(mut stmt) = conn.prepare(&sql) else { return vec![] };
+        let sql = format!(
+            "SELECT {} FROM history WHERE batch=?1 ORDER BY id DESC",
+            Self::COLS
+        );
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            return vec![];
+        };
         stmt.query_map([batch], Self::row)
             .map(|rows| rows.flatten().collect())
             .unwrap_or_default()
@@ -229,11 +245,17 @@ impl Store {
     pub fn history_get(&self, id: i64) -> Option<HistoryRow> {
         let conn = self.conn.lock();
         let sql = format!("SELECT {} FROM history WHERE id=?1", Self::COLS);
-        conn.query_row(&sql, [id], Self::row).optional().ok().flatten()
+        conn.query_row(&sql, [id], Self::row)
+            .optional()
+            .ok()
+            .flatten()
     }
 
     pub fn mark_undone(&self, id: i64) {
-        let _ = self.conn.lock().execute("UPDATE history SET undone=1 WHERE id=?1", [id]);
+        let _ = self
+            .conn
+            .lock()
+            .execute("UPDATE history SET undone=1 WHERE id=?1", [id]);
     }
 
     pub fn stats(&self) -> Stats {
@@ -247,14 +269,23 @@ impl Store {
         };
         let week_ago = now() - 7 * DAY;
         let mut st = Stats {
-            freed_total: q(&format!("SELECT SUM(bytes) FROM history WHERE {freeing} AND ?1=?1"), 0) as u64,
-            freed_week: q(&format!("SELECT SUM(bytes) FROM history WHERE {freeing} AND at>=?1"), week_ago) as u64,
+            freed_total: q(
+                &format!("SELECT SUM(bytes) FROM history WHERE {freeing} AND ?1=?1"),
+                0,
+            ) as u64,
+            freed_week: q(
+                &format!("SELECT SUM(bytes) FROM history WHERE {freeing} AND at>=?1"),
+                week_ago,
+            ) as u64,
             tidied_total: q(
                 "SELECT COUNT(*) FROM history WHERE action IN ('archive','sweep') AND undone=0 AND ?1=?1",
                 0,
             ) as u64,
             actions_total: q("SELECT COUNT(*) FROM history WHERE undone=0 AND ?1=?1", 0) as u64,
-            kept_total: q("SELECT COUNT(*) FROM history WHERE action='keep' AND undone=0 AND ?1=?1", 0) as u64,
+            kept_total: q(
+                "SELECT COUNT(*) FROM history WHERE action='keep' AND undone=0 AND ?1=?1",
+                0,
+            ) as u64,
             streak_days: 0,
         };
         // Consecutive days (ending today or yesterday) with at least one manual action.

@@ -8,7 +8,14 @@ use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
-const TEMP_EXT: &[&str] = &["crdownload", "part", "tmp", "partial", "download", "opdownload"];
+const TEMP_EXT: &[&str] = &[
+    "crdownload",
+    "part",
+    "tmp",
+    "partial",
+    "download",
+    "opdownload",
+];
 
 pub fn start(app: &AppHandle) {
     let state = app.state::<AppState>();
@@ -26,7 +33,9 @@ pub fn start(app: &AppHandle) {
         let arrived = matches!(
             ev.kind,
             EventKind::Create(CreateKind::Any | CreateKind::File | CreateKind::Folder)
-                | EventKind::Modify(ModifyKind::Name(RenameMode::To | RenameMode::Both | RenameMode::Any))
+                | EventKind::Modify(ModifyKind::Name(
+                    RenameMode::To | RenameMode::Both | RenameMode::Any
+                ))
         );
         if !arrived {
             return;

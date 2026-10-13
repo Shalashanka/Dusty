@@ -4,7 +4,7 @@
 //! `FindNextFileW` buffer, so walking costs one syscall per directory, not per
 //! file. Sub-directories are fanned out over the current rayon pool.
 
-use crate::timeutil::{unix_res, now};
+use crate::timeutil::{now, unix_res};
 use rayon::prelude::*;
 use std::fs::{self, Metadata};
 use std::os::windows::fs::MetadataExt;
@@ -64,11 +64,16 @@ pub fn dir_stats(path: &Path) -> DirStats {
 
 /// Like [`dir_stats`] but only counts files untouched for `older_than_days`.
 pub fn dir_stats_older(path: &Path, older_than_days: u32) -> DirStats {
-    stats_rec(path, Some(now() - older_than_days as i64 * crate::timeutil::DAY))
+    stats_rec(
+        path,
+        Some(now() - older_than_days as i64 * crate::timeutil::DAY),
+    )
 }
 
 fn stats_rec(path: &Path, cutoff: Option<i64>) -> DirStats {
-    let Ok(rd) = fs::read_dir(path) else { return DirStats::default() };
+    let Ok(rd) = fs::read_dir(path) else {
+        return DirStats::default();
+    };
     let mut s = DirStats::default();
     let mut subdirs = Vec::new();
     for e in rd.flatten() {
@@ -82,10 +87,10 @@ fn stats_rec(path: &Path, cutoff: Option<i64>) -> DirStats {
         }
         let m = unix_res(md.modified());
         s.newest = s.newest.max(m);
-        if let Some(c) = cutoff {
-            if m.max(unix_res(md.created())) >= c {
-                continue;
-            }
+        if let Some(c) = cutoff
+            && m.max(unix_res(md.created())) >= c
+        {
+            continue;
         }
         if !is_cloud(&md) {
             s.bytes += md.len();
@@ -109,8 +114,14 @@ pub struct FileEntry {
 
 /// Collects all regular, local (non-cloud), non-hidden files under `root`
 /// with `size >= min_size`. `skip_dir` prunes directories by lowercase name.
-pub fn collect_files(root: &Path, min_size: u64, skip_dir: &(dyn Fn(&str) -> bool + Sync)) -> Vec<FileEntry> {
-    let Ok(rd) = fs::read_dir(root) else { return vec![] };
+pub fn collect_files(
+    root: &Path,
+    min_size: u64,
+    skip_dir: &(dyn Fn(&str) -> bool + Sync),
+) -> Vec<FileEntry> {
+    let Ok(rd) = fs::read_dir(root) else {
+        return vec![];
+    };
     let mut out = Vec::new();
     let mut subdirs = Vec::new();
     for e in rd.flatten() {
@@ -145,7 +156,9 @@ pub fn collect_files(root: &Path, min_size: u64, skip_dir: &(dyn Fn(&str) -> boo
 
 /// Top-level entries of a directory with their metadata.
 pub fn children(path: &Path) -> Vec<(PathBuf, Metadata)> {
-    let Ok(rd) = fs::read_dir(path) else { return vec![] };
+    let Ok(rd) = fs::read_dir(path) else {
+        return vec![];
+    };
     rd.flatten()
         .filter_map(|e| e.metadata().ok().map(|m| (e.path(), m)))
         .collect()
@@ -280,8 +293,14 @@ pub fn unique_dest(dir: &Path, name: &str) -> PathBuf {
         return first;
     }
     let p = Path::new(name);
-    let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let stem = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = p
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     (2..)
         .map(|i| dir.join(format!("{stem} ({i}){ext}")))
         .find(|c| !c.exists())

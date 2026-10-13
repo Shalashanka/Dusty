@@ -1,7 +1,7 @@
 //! Downloads: stale items, used installers, already-extracted archives and
 //! forgotten backups.
 
-use super::{normalize, Ctx};
+use super::{Ctx, normalize};
 use crate::model::{Action, Finding, Kind};
 use crate::timeutil::human_age;
 use crate::walk::{self, children, ext_of, is_hidden, name_of, touched};
@@ -11,7 +11,14 @@ use std::path::{Path, PathBuf};
 
 const INSTALLER_EXT: &[&str] = &["exe", "msi", "msix", "msixbundle", "appx", "appxbundle"];
 const ARCHIVE_EXT: &[&str] = &["zip", "7z", "rar", "tar", "gz", "tgz", "xz", "bz2", "zst"];
-const PARTIAL_EXT: &[&str] = &["crdownload", "part", "partial", "download", "opdownload", "tmp"];
+const PARTIAL_EXT: &[&str] = &[
+    "crdownload",
+    "part",
+    "partial",
+    "download",
+    "opdownload",
+    "tmp",
+];
 const IGNORE_NAMES: &[&str] = &["desktop.ini", "thumbs.db", ".ds_store"];
 
 struct Item {
@@ -29,7 +36,10 @@ fn load_items(ctx: &Ctx, dir: &Path) -> Vec<Item> {
         .into_par_iter()
         .filter_map(|(path, md)| {
             let name = name_of(&path);
-            if is_hidden(&md) || walk::is_link(&md) || IGNORE_NAMES.contains(&name.to_lowercase().as_str()) {
+            if is_hidden(&md)
+                || walk::is_link(&md)
+                || IGNORE_NAMES.contains(&name.to_lowercase().as_str())
+            {
                 return None;
             }
             let mut t = touched(&md).max(ctx.first_seen(&path));
@@ -40,7 +50,19 @@ fn load_items(ctx: &Ctx, dir: &Path) -> Vec<Item> {
             } else {
                 (md.len(), 1)
             };
-            Some(Item { ext: if md.is_dir() { String::new() } else { ext_of(&path) }, name, is_dir: md.is_dir(), bytes, files, touched: t, path })
+            Some(Item {
+                ext: if md.is_dir() {
+                    String::new()
+                } else {
+                    ext_of(&path)
+                },
+                name,
+                is_dir: md.is_dir(),
+                bytes,
+                files,
+                touched: t,
+                path,
+            })
         })
         .collect()
 }
@@ -51,7 +73,12 @@ fn base(ctx: &Ctx, it: &Item, kind: Kind, suggested: Action) -> Finding {
         &it.path.to_string_lossy(),
         it.name.clone(),
         suggested,
-        vec![Action::Recycle, Action::Archive, Action::Keep, Action::Snooze],
+        vec![
+            Action::Recycle,
+            Action::Archive,
+            Action::Keep,
+            Action::Snooze,
+        ],
     );
     f.bytes = it.bytes;
     f.items = it.files;
@@ -70,9 +97,17 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
     for dir in &s.inbox_dirs {
         let dir = Path::new(dir);
         let items = load_items(ctx, dir);
-        let dir_names: HashSet<String> =
-            items.iter().filter(|i| i.is_dir).map(|i| i.name.to_lowercase()).collect();
-        out.extend(items.par_iter().filter_map(|it| classify(ctx, it, &dir_names)).collect::<Vec<_>>());
+        let dir_names: HashSet<String> = items
+            .iter()
+            .filter(|i| i.is_dir)
+            .map(|i| i.name.to_lowercase())
+            .collect();
+        out.extend(
+            items
+                .par_iter()
+                .filter_map(|it| classify(ctx, it, &dir_names))
+                .collect::<Vec<_>>(),
+        );
     }
     out
 }
@@ -82,9 +117,17 @@ fn classify(ctx: &Ctx, it: &Item, dir_names: &HashSet<String>) -> Option<Finding
     let age = ctx.age_days(it.touched);
     let ext = it.ext.as_str();
 
-    if s.on(Kind::Installer) && !it.is_dir && INSTALLER_EXT.contains(&ext) && age >= s.installer_days as i64 {
+    if s.on(Kind::Installer)
+        && !it.is_dir
+        && INSTALLER_EXT.contains(&ext)
+        && age >= s.installer_days as i64
+    {
         let mut f = base(ctx, it, Kind::Installer, Action::Recycle);
-        let stem = it.path.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
+        let stem = it
+            .path
+            .file_stem()
+            .map(|x| x.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let looks_setup = is_setup_name(&stem) || ext != "exe";
         if let Some(app) = match_installed(&stem, &ctx.installed) {
             f.confidence = 0.92;
@@ -105,14 +148,24 @@ fn classify(ctx: &Ctx, it: &Item, dir_names: &HashSet<String>) -> Option<Finding
         return Some(f);
     }
 
-    if s.on(Kind::ExtractedArchive) && !it.is_dir && ARCHIVE_EXT.contains(&ext) && age >= 1 {
-        if let Some(folder) = extracted_twin(&it.name, dir_names) {
-            let mut f = base(ctx, it, Kind::ExtractedArchive, Action::Recycle);
-            f.confidence = 0.88;
-            f.reason = format!("Already extracted to the “{folder}” folder right next to it. The archive is a leftover.");
-            f.related = vec![it.path.with_file_name(&folder).to_string_lossy().into_owned()];
-            return Some(f);
-        }
+    if s.on(Kind::ExtractedArchive)
+        && !it.is_dir
+        && ARCHIVE_EXT.contains(&ext)
+        && age >= 1
+        && let Some(folder) = extracted_twin(&it.name, dir_names)
+    {
+        let mut f = base(ctx, it, Kind::ExtractedArchive, Action::Recycle);
+        f.confidence = 0.88;
+        f.reason = format!(
+            "Already extracted to the “{folder}” folder right next to it. The archive is a leftover."
+        );
+        f.related = vec![
+            it.path
+                .with_file_name(&folder)
+                .to_string_lossy()
+                .into_owned(),
+        ];
+        return Some(f);
     }
 
     if s.on(Kind::Backup) && age >= s.backup_days as i64 && is_backup_name(&it.name) {
@@ -133,7 +186,10 @@ fn classify(ctx: &Ctx, it: &Item, dir_names: &HashSet<String>) -> Option<Finding
             f.reason = if it.is_dir {
                 format!("Nothing inside this folder changed in {}.", human_age(age))
             } else {
-                format!("Untouched for {}. Downloads you still need usually get opened or moved.", human_age(age))
+                format!(
+                    "Untouched for {}. Downloads you still need usually get opened or moved.",
+                    human_age(age)
+                )
             };
             return Some(f);
         }
@@ -155,7 +211,10 @@ fn backup_finding(ctx: &Ctx, it: &Item, age: i64) -> Finding {
         }
         None => {
             f.confidence = 0.5;
-            f.reason = format!("Looks like a backup copy that nobody touched in {}.", human_age(age));
+            f.reason = format!(
+                "Looks like a backup copy that nobody touched in {}.",
+                human_age(age)
+            );
         }
     }
     f
@@ -168,7 +227,11 @@ pub fn scan_backups_elsewhere(ctx: &Ctx) -> Vec<Finding> {
     if !s.desktop_dir.is_empty() {
         dirs.push(&s.desktop_dir);
     }
-    if let Some(docs) = s.library_dirs.iter().find(|d| d.to_lowercase().ends_with("documents")) {
+    if let Some(docs) = s
+        .library_dirs
+        .iter()
+        .find(|d| d.to_lowercase().ends_with("documents"))
+    {
         dirs.push(docs);
     }
     let mut out = Vec::new();
@@ -198,7 +261,11 @@ pub fn scan_backups_elsewhere(ctx: &Ctx) -> Vec<Finding> {
                     }
                     let it = Item {
                         name: name_of(&path),
-                        ext: if md.is_dir() { String::new() } else { ext_of(&path) },
+                        ext: if md.is_dir() {
+                            String::new()
+                        } else {
+                            ext_of(&path)
+                        },
                         is_dir: md.is_dir(),
                         bytes,
                         files,
@@ -216,17 +283,24 @@ pub fn scan_backups_elsewhere(ctx: &Ctx) -> Vec<Finding> {
 // ---- name heuristics -------------------------------------------------------
 
 const BACKUP_MARKERS: &[&str] = &[
-    "_backup", "-backup", " backup", ".backup", "backup_", "backup-", "_bckp", "-bckp", "_bkp", "-bkp",
-    "_old", "-old", " old", " - copy", " - copia", " - kopie", " - copie", "(copy", "copy of ",
+    "_backup", "-backup", " backup", ".backup", "backup_", "backup-", "_bckp", "-bckp", "_bkp",
+    "-bkp", "_old", "-old", " old", " - copy", " - copia", " - kopie", " - copie", "(copy",
+    "copy of ",
 ];
 
 pub fn is_backup_name(name: &str) -> bool {
     let n = name.to_lowercase();
-    let ext = Path::new(&n).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = Path::new(&n)
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+        .unwrap_or_default();
     if matches!(ext.as_str(), "bak" | "old" | "orig" | "bkp") {
         return true;
     }
-    let stem = Path::new(&n).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(n.clone());
+    let stem = Path::new(&n)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or(n.clone());
     BACKUP_MARKERS.iter().any(|m| stem.contains(m)) || stem.ends_with("backup") || stem == "old"
 }
 
@@ -242,15 +316,20 @@ fn original_of(path: &Path) -> Option<PathBuf> {
             candidates.push(name[..stripped.len()].to_string());
         }
     }
-    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     for m in BACKUP_MARKERS.iter().chain([&"backup"]) {
-        if let Some(pos) = lower.find(m) {
-            if pos > 0 {
-                let head = name[..pos].trim_end_matches([' ', '-', '_', '.']).to_string();
-                candidates.push(head.clone());
-                if !ext.is_empty() {
-                    candidates.push(format!("{head}{ext}"));
-                }
+        if let Some(pos) = lower.find(m)
+            && pos > 0
+        {
+            let head = name[..pos]
+                .trim_end_matches([' ', '-', '_', '.'])
+                .to_string();
+            candidates.push(head.clone());
+            if !ext.is_empty() {
+                candidates.push(format!("{head}{ext}"));
             }
         }
     }
@@ -282,27 +361,65 @@ fn extracted_twin(name: &str, dir_names: &HashSet<String>) -> Option<String> {
 
 fn strip_copy_suffix(s: &str) -> &str {
     // "foo (1)" -> "foo"
-    if s.ends_with(')') {
-        if let Some(i) = s.rfind(" (") {
-            if s[i + 2..s.len() - 1].chars().all(|c| c.is_ascii_digit()) {
-                return &s[..i];
-            }
-        }
+    if s.ends_with(')')
+        && let Some(i) = s.rfind(" (")
+        && s[i + 2..s.len() - 1].chars().all(|c| c.is_ascii_digit())
+    {
+        return &s[..i];
     }
     s
 }
 
-const SETUP_WORDS: &[&str] = &["setup", "install", "installer", "update", "upgrade", "x64", "x86", "win", "amd64", "arm64"];
+const SETUP_WORDS: &[&str] = &[
+    "setup",
+    "install",
+    "installer",
+    "update",
+    "upgrade",
+    "x64",
+    "x86",
+    "win",
+    "amd64",
+    "arm64",
+];
 
 fn is_setup_name(stem: &str) -> bool {
     let l = stem.to_lowercase();
-    SETUP_WORDS[..5].iter().any(|w| l.contains(w)) || l.chars().filter(|c| c.is_ascii_digit()).count() >= 3
+    SETUP_WORDS[..5].iter().any(|w| l.contains(w))
+        || l.chars().filter(|c| c.is_ascii_digit()).count() >= 3
 }
 
 const NAME_NOISE: &[&str] = &[
-    "windows", "win", "win32", "win64", "x64", "x86", "amd64", "arm64", "arm", "bit", "bits", "user",
-    "setup", "installer", "install", "release", "portable", "latest", "stable", "version", "full",
-    "export", "web", "online", "offline", "the", "for", "and", "msi", "exe",
+    "windows",
+    "win",
+    "win32",
+    "win64",
+    "x64",
+    "x86",
+    "amd64",
+    "arm64",
+    "arm",
+    "bit",
+    "bits",
+    "user",
+    "setup",
+    "installer",
+    "install",
+    "release",
+    "portable",
+    "latest",
+    "stable",
+    "version",
+    "full",
+    "export",
+    "web",
+    "online",
+    "offline",
+    "the",
+    "for",
+    "and",
+    "msi",
+    "exe",
 ];
 
 /// Up to two distinctive words of a file name: `NVIDIA_Broadcast_v2.0` ->
@@ -332,7 +449,8 @@ fn match_installed(stem: &str, installed: &[String]) -> Option<String> {
         .iter()
         .map(|name| (name, normalize(name)))
         .filter(|(_, n)| {
-            let first_ok = n.starts_with(first.as_str()) || (first.len() >= 5 && n.contains(first.as_str()));
+            let first_ok =
+                n.starts_with(first.as_str()) || (first.len() >= 5 && n.contains(first.as_str()));
             first_ok && toks[1..].iter().all(|t| n.contains(t.as_str()))
         })
         .min_by_key(|(_, n)| n.len())
@@ -356,17 +474,35 @@ mod tests {
 
     #[test]
     fn twins() {
-        let dirs: HashSet<String> = ["ffmpeg-7.1".into(), "repo-main".into()].into_iter().collect();
-        assert_eq!(extracted_twin("ffmpeg-7.1.zip", &dirs).as_deref(), Some("ffmpeg-7.1"));
-        assert_eq!(extracted_twin("repo-main (1).zip", &dirs).as_deref(), Some("repo-main"));
+        let dirs: HashSet<String> = ["ffmpeg-7.1".into(), "repo-main".into()]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            extracted_twin("ffmpeg-7.1.zip", &dirs).as_deref(),
+            Some("ffmpeg-7.1")
+        );
+        assert_eq!(
+            extracted_twin("repo-main (1).zip", &dirs).as_deref(),
+            Some("repo-main")
+        );
         assert_eq!(extracted_twin("other.zip", &dirs), None);
     }
 
     #[test]
     fn installers() {
-        let installed = vec!["Discord".to_string(), "Node.js".to_string(), "Google Chrome".to_string()];
-        assert_eq!(match_installed("DiscordSetup", &installed).as_deref(), Some("Discord"));
-        assert_eq!(match_installed("node-v20.11.0-x64", &installed).as_deref(), Some("Node.js"));
+        let installed = vec![
+            "Discord".to_string(),
+            "Node.js".to_string(),
+            "Google Chrome".to_string(),
+        ];
+        assert_eq!(
+            match_installed("DiscordSetup", &installed).as_deref(),
+            Some("Discord")
+        );
+        assert_eq!(
+            match_installed("node-v20.11.0-x64", &installed).as_deref(),
+            Some("Node.js")
+        );
         assert_eq!(match_installed("Blender-4.2", &installed), None);
 
         let installed = vec![
@@ -375,9 +511,18 @@ mod tests {
             "Ubisoft Connect".to_string(),
             "Shutter Encoder (64bit)".to_string(),
         ];
-        assert_eq!(match_installed("microsoft-jdk-17.0.18-windows-x64", &installed), None);
-        assert_eq!(match_installed("NVIDIA_Broadcast_v2.0.2.31240911", &installed), None);
-        assert_eq!(match_installed("UbisoftConnectInstaller", &installed).as_deref(), Some("Ubisoft Connect"));
+        assert_eq!(
+            match_installed("microsoft-jdk-17.0.18-windows-x64", &installed),
+            None
+        );
+        assert_eq!(
+            match_installed("NVIDIA_Broadcast_v2.0.2.31240911", &installed),
+            None
+        );
+        assert_eq!(
+            match_installed("UbisoftConnectInstaller", &installed).as_deref(),
+            Some("Ubisoft Connect")
+        );
         assert_eq!(
             match_installed("Shutter Encoder 20.2 Windows 64bits", &installed).as_deref(),
             Some("Shutter Encoder (64bit)")
@@ -389,8 +534,14 @@ mod tests {
         let d = std::env::temp_dir().join(format!("dustling-orig-{}", std::process::id()));
         std::fs::create_dir_all(d.join("OpusStudio")).unwrap();
         std::fs::write(d.join("settings.local.json"), b"{}").unwrap();
-        assert_eq!(original_of(&d.join("OpusStudio_backup")), Some(d.join("OpusStudio")));
-        assert_eq!(original_of(&d.join("settings.local_bckp.json")), Some(d.join("settings.local.json")));
+        assert_eq!(
+            original_of(&d.join("OpusStudio_backup")),
+            Some(d.join("OpusStudio"))
+        );
+        assert_eq!(
+            original_of(&d.join("settings.local_bckp.json")),
+            Some(d.join("settings.local.json"))
+        );
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

@@ -31,10 +31,21 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
                 vec![Action::Sweep, Action::Snooze],
             );
             f.items = loose.len() as u64;
-            f.bytes = loose.iter().filter(|(_, m)| m.is_file()).map(|(_, m)| m.len()).sum();
+            f.bytes = loose
+                .iter()
+                .filter(|(_, m)| m.is_file())
+                .map(|(_, m)| m.len())
+                .sum();
             f.is_dir = true;
-            f.related = loose.iter().map(|(p, _)| p.to_string_lossy().into_owned()).collect();
-            f.last_touched = loose.iter().map(|(_, m)| walk::touched(m)).max().unwrap_or(0);
+            f.related = loose
+                .iter()
+                .map(|(p, _)| p.to_string_lossy().into_owned())
+                .collect();
+            f.last_touched = loose
+                .iter()
+                .map(|(_, m)| walk::touched(m))
+                .max()
+                .unwrap_or(0);
             f.confidence = 0.7;
             f.reason = format!(
                 "A clear desktop is a clear head. I'll move everything except shortcuts into “{SWEPT_DIR}\\{}”. Nothing gets deleted.",
@@ -68,7 +79,10 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
                     f.items = 0;
                     f.last_touched = created;
                     f.confidence = 0.9;
-                    f.reason = format!("An empty folder, created {} ago and never filled.", human_age(age));
+                    f.reason = format!(
+                        "An empty folder, created {} ago and never filled.",
+                        human_age(age)
+                    );
                     out.push(f);
                 }
             }
@@ -79,7 +93,9 @@ pub fn scan(ctx: &Ctx) -> Vec<Finding> {
 
 /// True when the tree contains no files at all (only empty sub-folders).
 pub fn is_empty_tree(p: &Path) -> bool {
-    let Ok(rd) = fs::read_dir(p) else { return false };
+    let Ok(rd) = fs::read_dir(p) else {
+        return false;
+    };
     for e in rd.flatten() {
         match e.metadata() {
             Ok(m) if m.is_dir() && !is_link(&m) => {

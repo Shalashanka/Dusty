@@ -10,15 +10,40 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const MARKERS: &[&str] = &[
-    ".git", "package.json", "cargo.toml", "pyproject.toml", "requirements.txt", "go.mod", "pom.xml",
-    "build.gradle", "build.gradle.kts", "composer.json", "gemfile", "pubspec.yaml", "cmakelists.txt",
+    ".git",
+    "package.json",
+    "cargo.toml",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "composer.json",
+    "gemfile",
+    "pubspec.yaml",
+    "cmakelists.txt",
 ];
 
 /// Junk directory names that are always regenerable.
 const ALWAYS: &[&str] = &[
-    "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".next",
-    ".nuxt", ".svelte-kit", ".turbo", ".parcel-cache", ".angular", ".expo", ".vite", ".dart_tool",
-    ".gradle", ".build",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    ".parcel-cache",
+    ".angular",
+    ".expo",
+    ".vite",
+    ".dart_tool",
+    ".gradle",
+    ".build",
 ];
 
 struct Listing {
@@ -28,7 +53,11 @@ struct Listing {
 impl Listing {
     fn of(dir: &Path) -> Self {
         let names = fs::read_dir(dir)
-            .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().to_lowercase()).collect())
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.file_name().to_string_lossy().to_lowercase())
+                    .collect()
+            })
             .unwrap_or_default();
         Listing { names }
     }
@@ -86,7 +115,9 @@ fn find_projects(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
 /// Walks a project: returns (junk dirs, newest source modification).
 fn survey(dir: &Path, depth: u32) -> (Vec<PathBuf>, i64) {
     let listing = Listing::of(dir);
-    let Ok(rd) = fs::read_dir(dir) else { return (vec![], 0) };
+    let Ok(rd) = fs::read_dir(dir) else {
+        return (vec![], 0);
+    };
     let mut junk = Vec::new();
     let mut newest = 0;
     let mut sub = Vec::new();
@@ -107,13 +138,13 @@ fn survey(dir: &Path, depth: u32) -> (Vec<PathBuf>, i64) {
             newest = newest.max(unix_res(md.modified()));
         }
     }
-    let (j, n) = sub
-        .par_iter()
-        .map(|d| survey(d, depth + 1))
-        .reduce(|| (vec![], 0), |mut a, b| {
+    let (j, n) = sub.par_iter().map(|d| survey(d, depth + 1)).reduce(
+        || (vec![], 0),
+        |mut a, b| {
             a.0.extend(b.0);
             (a.0, a.1.max(b.1))
-        });
+        },
+    );
     junk.extend(j);
     (junk, newest.max(n))
 }

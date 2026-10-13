@@ -4,7 +4,7 @@
 use super::Ctx;
 use crate::model::{Action, Finding, Kind};
 use crate::timeutil::{human_age, human_bytes};
-use crate::walk::{collect_files, ext_of, name_of, FileEntry};
+use crate::walk::{FileEntry, collect_files, ext_of, name_of};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -15,8 +15,18 @@ use xxhash_rust::xxh3::Xxh3;
 const HEAD: usize = 64 * 1024;
 
 const SKIP_DIRS: &[&str] = &[
-    "node_modules", "target", ".git", "__pycache__", ".venv", "venv", "$recycle.bin",
-    "appdata", "my music", "my pictures", "my videos", ".cache",
+    "node_modules",
+    "target",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "$recycle.bin",
+    "appdata",
+    "my music",
+    "my pictures",
+    "my videos",
+    ".cache",
 ];
 
 pub fn scan(ctx: &Ctx) -> Vec<Finding> {
@@ -66,7 +76,12 @@ fn big_dormant(ctx: &Ctx, files: &[FileEntry]) -> Vec<Finding> {
                 &p,
                 name_of(&e.path),
                 Action::Archive,
-                vec![Action::Archive, Action::Recycle, Action::Keep, Action::Snooze],
+                vec![
+                    Action::Archive,
+                    Action::Recycle,
+                    Action::Keep,
+                    Action::Snooze,
+                ],
             );
             f.bytes = e.size;
             f.last_touched = e.touched;
@@ -105,7 +120,11 @@ fn duplicates(ctx: &Ctx, files: Vec<FileEntry>) -> Vec<Finding> {
     for f in files {
         by_size.entry(f.size).or_default().push(f);
     }
-    let candidates: Vec<FileEntry> = by_size.into_values().filter(|g| g.len() > 1).flatten().collect();
+    let candidates: Vec<FileEntry> = by_size
+        .into_values()
+        .filter(|g| g.len() > 1)
+        .flatten()
+        .collect();
     if candidates.is_empty() {
         return vec![];
     }

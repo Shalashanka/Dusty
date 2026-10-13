@@ -20,13 +20,27 @@ pub fn init(data_dir: &std::path::Path) {
 }
 
 pub fn show(app: &AppHandle, title: &str, body: &str, review_buttons: bool) {
-    let id = if *REGISTERED.get().unwrap_or(&false) { APP_ID } else { Toast::POWERSHELL_APP_ID };
-    let mut t = Toast::new(id).title(title).text1(body).sound(Some(Sound::Default)).duration(Duration::Long);
+    let id = if *REGISTERED.get().unwrap_or(&false) {
+        APP_ID
+    } else {
+        Toast::POWERSHELL_APP_ID
+    };
+    let mut t = Toast::new(id)
+        .title(title)
+        .text1(body)
+        .sound(Some(Sound::Default))
+        .duration(Duration::Long);
     if let Some(icon) = ICON.get() {
-        t = t.icon(icon, tauri_winrt_notification::IconCrop::Circular, "Dustling");
+        t = t.icon(
+            icon,
+            tauri_winrt_notification::IconCrop::Circular,
+            "Dustling",
+        );
     }
     if review_buttons {
-        t = t.add_button("Let's tidy", "review").add_button("Not now", "later");
+        t = t
+            .add_button("Let's tidy", "review")
+            .add_button("Not now", "later");
     }
     let handle = app.clone();
     t = t.on_activated(move |action| {
@@ -40,6 +54,9 @@ pub fn show(app: &AppHandle, title: &str, body: &str, review_buttons: bool) {
         Ok(())
     });
     if t.show().is_err() && id != Toast::POWERSHELL_APP_ID {
-        let _ = Toast::new(Toast::POWERSHELL_APP_ID).title(title).text1(body).show();
+        let _ = Toast::new(Toast::POWERSHELL_APP_ID)
+            .title(title)
+            .text1(body)
+            .show();
     }
 }

@@ -5,7 +5,7 @@ use crate::model::{Action, Finding, Kind};
 use crate::settings::Settings;
 use crate::state::AppState;
 use crate::store::NewHistory;
-use crate::timeutil::{day_stamp, month_stamp, now, DAY};
+use crate::timeutil::{DAY, day_stamp, month_stamp, now};
 use crate::walk::{self, move_path, name_of, unique_dest};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,13 @@ pub struct Outcome {
 }
 
 pub fn new_batch() -> String {
-    format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())
+    format!(
+        "{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )
 }
 
 /// Applies `action` to the findings with `ids`. Successful ones leave the
@@ -30,12 +36,19 @@ pub fn apply(state: &AppState, ids: &[String], action: Action, auto: bool) -> Ou
     let settings = state.settings.read().clone();
     let targets: Vec<Finding> = {
         let all = state.findings.read();
-        all.iter().filter(|f| ids.contains(&f.id)).cloned().collect()
+        all.iter()
+            .filter(|f| ids.contains(&f.id))
+            .cloned()
+            .collect()
     };
-    let mut out = Outcome { batch: new_batch(), ..Default::default() };
+    let mut out = Outcome {
+        batch: new_batch(),
+        ..Default::default()
+    };
     for f in targets {
         if !f.actions.contains(&action) {
-            out.errors.push(format!("{}: can't {} this", f.title, action.key()));
+            out.errors
+                .push(format!("{}: can't {} this", f.title, action.key()));
             continue;
         }
         match apply_one(state, &settings, &f, action, &out.batch, auto) {
@@ -133,7 +146,9 @@ fn apply_one(
             Ok((store.add_history(hist), 0, 1))
         }
         Action::Sweep => {
-            let dir = Path::new(&s.desktop_dir).join(crate::detect::SWEPT_DIR).join(day_stamp());
+            let dir = Path::new(&s.desktop_dir)
+                .join(crate::detect::SWEPT_DIR)
+                .join(day_stamp());
             let mut moved = 0;
             let mut last = 0;
             for item in &f.related {
@@ -176,7 +191,11 @@ pub fn undo(state: &AppState, history_id: i64) -> Result<(), String> {
     if !row.undoable || row.undone {
         return Err("this can't be undone".into());
     }
-    let rows = if row.action == "sweep" { store.history_by_batch(&row.batch) } else { vec![row] };
+    let rows = if row.action == "sweep" {
+        store.history_by_batch(&row.batch)
+    } else {
+        vec![row]
+    };
     for r in &rows {
         if r.undone {
             continue;
@@ -207,10 +226,21 @@ pub fn undo(state: &AppState, history_id: i64) -> Result<(), String> {
 fn restore_from_bin(original: &str) -> Result<(), String> {
     use trash::os_limited::{list, restore_all};
     let items = list().map_err(|e| e.to_string())?;
+    // The bin records long, canonical paths; ours may be 8.3 or differently cased.
+    let canon = |p: &Path| -> String {
+        std::fs::canonicalize(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .to_lowercase()
+    };
     let target = Path::new(original);
+    let parent = canon(target.parent().unwrap_or(target));
+    let name = name_of(target).to_lowercase();
     let item = items
         .into_iter()
-        .filter(|i| i.original_path() == target)
+        .filter(|i| {
+            i.name.to_string_lossy().to_lowercase() == name && canon(&i.original_parent) == parent
+        })
         .max_by_key(|i| i.time_deleted)
         .ok_or("couldn't find it in the Recycle Bin anymore")?;
     restore_all([item]).map_err(|e| e.to_string())
@@ -221,5 +251,69 @@ fn friendly(e: std::io::Error) -> String {
         std::io::ErrorKind::PermissionDenied => "it's in use or protected".into(),
         std::io::ErrorKind::NotFound => "it's already gone".into(),
         _ => e.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Store;
+
+    fn setup(name: &str) -> (AppState, PathBuf, Finding) {
+        let dir = std::env::temp_dir().join(format!("dustling-act-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(format!("{name}.txt"));
+        std::fs::write(&file, b"dust").unwrap();
+        let state = AppState::new(Store::memory(), true);
+        state.settings.write().archive_root = dir.join("archive").to_string_lossy().into_owned();
+        let mut f = Finding::new(
+            Kind::StaleDownload,
+            &file.to_string_lossy(),
+            "x".into(),
+            Action::Recycle,
+            vec![Action::Recycle, Action::Archive, Action::Keep],
+        );
+        f.bytes = 4;
+        state.findings.write().push(f.clone());
+        (state, file, f)
+    }
+
+    #[test]
+    fn recycle_then_undo_restores_file() {
+        let (state, file, f) = setup("recycle");
+        let out = apply(&state, &[f.id.clone()], Action::Recycle, false);
+        assert_eq!(out.done, 1, "{:?}", out.errors);
+        assert!(!file.exists());
+        assert!(state.findings.read().is_empty());
+        let hid = state.store.history(1)[0].id;
+        undo(&state, hid).unwrap();
+        assert!(file.exists());
+        assert_eq!(state.findings.read().len(), 1);
+        std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn archive_then_undo_moves_back() {
+        let (state, file, f) = setup("archive");
+        let out = apply(&state, &[f.id.clone()], Action::Archive, false);
+        assert_eq!(out.moved, 1, "{:?}", out.errors);
+        assert!(!file.exists());
+        let row = state.store.history(1).remove(0);
+        assert!(Path::new(row.dest.as_deref().unwrap()).exists());
+        undo(&state, row.id).unwrap();
+        assert!(file.exists());
+        std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn keep_suppresses_and_rejects_foreign_actions() {
+        let (state, file, f) = setup("keep");
+        let out = apply(&state, &[f.id.clone()], Action::Delete, false);
+        assert_eq!(out.done, 0);
+        assert!(file.exists(), "Delete is not offered for this finding");
+        apply(&state, &[f.id.clone()], Action::Keep, false);
+        assert!(state.store.suppressed().contains(&f.id));
+        std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
     }
 }

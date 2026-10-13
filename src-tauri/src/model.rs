@@ -125,7 +125,13 @@ pub struct Finding {
 }
 
 impl Finding {
-    pub fn new(kind: Kind, path: &str, title: String, suggested: Action, actions: Vec<Action>) -> Self {
+    pub fn new(
+        kind: Kind,
+        path: &str,
+        title: String,
+        suggested: Action,
+        actions: Vec<Action>,
+    ) -> Self {
         Finding {
             id: finding_id(kind, path),
             kind,

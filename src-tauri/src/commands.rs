@@ -97,8 +97,13 @@ pub fn get_settings(state: State<AppState>) -> Settings {
 pub fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> R<()> {
     let autostart = app.autolaunch();
     let enabled = autostart.is_enabled().unwrap_or(false);
-    if settings.start_with_windows != enabled {
-        let r = if settings.start_with_windows { autostart.enable() } else { autostart.disable() };
+    // Debug builds never register themselves to run at login.
+    if settings.start_with_windows != enabled && !cfg!(debug_assertions) {
+        let r = if settings.start_with_windows {
+            autostart.enable()
+        } else {
+            autostart.disable()
+        };
         r.map_err(|e| e.to_string())?;
     }
     state.store.save_settings(&settings);
@@ -119,7 +124,9 @@ pub fn pause(app: AppHandle, state: State<AppState>, minutes: i64) {
 #[tauri::command]
 pub fn reveal(path: String) {
     if path.starts_with("shell:") {
-        let _ = std::process::Command::new("explorer.exe").arg(&path).spawn();
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(&path)
+            .spawn();
     } else {
         crate::winsys::reveal(&path);
     }
@@ -127,7 +134,10 @@ pub fn reveal(path: String) {
 
 #[tauri::command]
 pub fn open_path(path: String) -> R<()> {
-    let _ = std::process::Command::new("explorer.exe").arg(&path).spawn().map_err(|e| e.to_string())?;
+    let _ = std::process::Command::new("explorer.exe")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -220,11 +230,19 @@ pub async fn space(path: String) -> R<SpaceResult> {
                     let st = walk::dir_stats(&p);
                     (st.bytes, st.files, st.newest)
                 } else {
-                    (if walk::is_cloud(&md) { 0 } else { md.len() }, 1, walk::touched(&md))
+                    (
+                        if walk::is_cloud(&md) { 0 } else { md.len() },
+                        1,
+                        walk::touched(&md),
+                    )
                 };
                 SpaceNode {
                     name: walk::name_of(&p),
-                    ext: if md.is_dir() { String::new() } else { walk::ext_of(&p) },
+                    ext: if md.is_dir() {
+                        String::new()
+                    } else {
+                        walk::ext_of(&p)
+                    },
                     path: p.to_string_lossy().into_owned(),
                     bytes,
                     files,
@@ -274,5 +292,7 @@ pub async fn recycle_path(app: AppHandle, path: String, bytes: u64) -> R<i64> {
 
 #[tauri::command]
 pub fn home_dir() -> String {
-    dirs::home_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "C:\\".into())
+    dirs::home_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "C:\\".into())
 }

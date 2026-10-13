@@ -140,7 +140,11 @@ mod tests {
 
     #[test]
     fn quiet_hours_wrap_midnight() {
-        let s = Settings { quiet_start: 22, quiet_end: 9, ..Settings::default() };
+        let s = Settings {
+            quiet_start: 22,
+            quiet_end: 9,
+            ..Settings::default()
+        };
         assert!(s.is_quiet_hour(23));
         assert!(s.is_quiet_hour(3));
         assert!(!s.is_quiet_hour(9));
@@ -149,7 +153,8 @@ mod tests {
 
     #[test]
     fn settings_roundtrip_with_missing_fields() {
-        let s: Settings = serde_json::from_str(r#"{"staleDays": 10, "rules": {"installer": "auto"}}"#).unwrap();
+        let s: Settings =
+            serde_json::from_str(r#"{"staleDays": 10, "rules": {"installer": "auto"}}"#).unwrap();
         assert_eq!(s.stale_days, 10);
         assert_eq!(s.mode(Kind::Installer), Mode::Auto);
         assert_eq!(s.mode(Kind::Backup), Mode::Ask);

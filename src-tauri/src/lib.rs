@@ -29,7 +29,9 @@ pub fn run() {
     let hidden = std::env::args().any(|a| a == "--hidden");
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app)
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
@@ -37,13 +39,16 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .setup(move |app| {
-            let data_dir = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir).join("Dustling");
+            let data_dir = dirs::data_local_dir()
+                .unwrap_or_else(std::env::temp_dir)
+                .join("Dustling");
             std::fs::create_dir_all(&data_dir)?;
             let store = store::Store::open(&data_dir.join("dustling.db"))?;
             let first_run = store.get("settings").is_none();
             app.manage(AppState::new(store, hidden));
 
-            if first_run {
+            // Debug builds never register themselves to run at login.
+            if first_run && !cfg!(debug_assertions) {
                 use tauri_plugin_autostart::ManagerExt;
                 let _ = app.autolaunch().enable();
                 let state = app.state::<AppState>();

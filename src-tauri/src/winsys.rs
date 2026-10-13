@@ -1,7 +1,6 @@
 //! Thin wrappers over the Win32 bits Dustling needs.
 
 use std::path::Path;
-use windows::core::{w, PCWSTR};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{
@@ -9,16 +8,20 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::Shell::{
-    SHEmptyRecycleBinW, SHQueryRecycleBinW, SHQueryUserNotificationState, QUNS_ACCEPTS_NOTIFICATIONS,
-    QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHERB_NOCONFIRMATION,
-    SHERB_NOPROGRESSUI, SHERB_NOSOUND, SHQUERYRBINFO,
+    QUNS_ACCEPTS_NOTIFICATIONS, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
+    SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND, SHEmptyRecycleBinW, SHQUERYRBINFO,
+    SHQueryRecycleBinW, SHQueryUserNotificationState,
 };
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+use windows::core::{PCWSTR, w};
 use winreg::RegKey;
+use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 
 /// Seconds since the last keyboard/mouse input.
 pub fn idle_secs() -> u64 {
-    let mut lii = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    let mut lii = LASTINPUTINFO {
+        cbSize: size_of::<LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
     unsafe {
         if !GetLastInputInfo(&mut lii).as_bool() {
             return 0;
@@ -41,7 +44,11 @@ pub enum UserState {
 pub fn user_state() -> UserState {
     match unsafe { SHQueryUserNotificationState() } {
         Ok(s) if s == QUNS_ACCEPTS_NOTIFICATIONS => UserState::Available,
-        Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE => {
+        Ok(s)
+            if s == QUNS_BUSY
+                || s == QUNS_RUNNING_D3D_FULL_SCREEN
+                || s == QUNS_PRESENTATION_MODE =>
+        {
             UserState::Busy
         }
         Ok(_) => UserState::Away,
@@ -61,14 +68,21 @@ pub fn low_battery() -> bool {
 /// Background mode lowers the calling thread's CPU, I/O and memory priority.
 pub fn set_background_mode(on: bool) {
     unsafe {
-        let mode = if on { THREAD_MODE_BACKGROUND_BEGIN } else { THREAD_MODE_BACKGROUND_END };
+        let mode = if on {
+            THREAD_MODE_BACKGROUND_BEGIN
+        } else {
+            THREAD_MODE_BACKGROUND_END
+        };
         let _ = SetThreadPriority(GetCurrentThread(), mode);
     }
 }
 
 /// (bytes, item count) across all drives' recycle bins.
 pub fn recycle_bin_info() -> (u64, u64) {
-    let mut info = SHQUERYRBINFO { cbSize: size_of::<SHQUERYRBINFO>() as u32, ..Default::default() };
+    let mut info = SHQUERYRBINFO {
+        cbSize: size_of::<SHQUERYRBINFO>() as u32,
+        ..Default::default()
+    };
     match unsafe { SHQueryRecycleBinW(PCWSTR::null(), &mut info) } {
         Ok(()) => (info.i64Size.max(0) as u64, info.i64NumItems.max(0) as u64),
         Err(_) => (0, 0),
@@ -77,7 +91,11 @@ pub fn recycle_bin_info() -> (u64, u64) {
 
 pub fn empty_recycle_bin() -> Result<(), String> {
     unsafe {
-        SHEmptyRecycleBinW(None, PCWSTR::null(), SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND)
+        SHEmptyRecycleBinW(
+            None,
+            PCWSTR::null(),
+            SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND,
+        )
     }
     .map_err(|e| e.message())
 }
@@ -90,15 +108,15 @@ pub fn download_origin(path: &Path) -> Option<String> {
     let text = std::fs::read_to_string(&ads).ok()?;
     let mut referrer = None;
     for line in text.lines() {
-        if let Some(v) = line.strip_prefix("HostUrl=") {
-            if v.starts_with("http") {
-                return Some(v.trim().to_string());
-            }
+        if let Some(v) = line.strip_prefix("HostUrl=")
+            && v.starts_with("http")
+        {
+            return Some(v.trim().to_string());
         }
-        if let Some(v) = line.strip_prefix("ReferrerUrl=") {
-            if v.starts_with("http") {
-                referrer = Some(v.trim().to_string());
-            }
+        if let Some(v) = line.strip_prefix("ReferrerUrl=")
+            && v.starts_with("http")
+        {
+            referrer = Some(v.trim().to_string());
         }
     }
     referrer
@@ -114,12 +132,14 @@ pub fn installed_programs() -> Vec<String> {
         (HKEY_LOCAL_MACHINE, UNINSTALL32),
         (HKEY_CURRENT_USER, UNINSTALL),
     ] {
-        let Ok(key) = RegKey::predef(hive).open_subkey(path) else { continue };
+        let Ok(key) = RegKey::predef(hive).open_subkey(path) else {
+            continue;
+        };
         for name in key.enum_keys().flatten() {
-            if let Ok(sub) = key.open_subkey(&name) {
-                if let Ok(dn) = sub.get_value::<String, _>("DisplayName") {
-                    out.push(dn);
-                }
+            if let Ok(sub) = key.open_subkey(&name)
+                && let Ok(dn) = sub.get_value::<String, _>("DisplayName")
+            {
+                out.push(dn);
             }
         }
     }
@@ -130,14 +150,19 @@ pub fn installed_programs() -> Vec<String> {
 /// when running unpackaged.
 pub fn register_app_id(app_id: &str, display_name: &str, icon: &Path) -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let Ok((key, _)) = hkcu.create_subkey(format!(r"Software\Classes\AppUserModelId\{app_id}")) else {
+    let Ok((key, _)) = hkcu.create_subkey(format!(r"Software\Classes\AppUserModelId\{app_id}"))
+    else {
         return false;
     };
     let ok = key.set_value("DisplayName", &display_name).is_ok()
-        && key.set_value("IconUri", &icon.to_string_lossy().as_ref()).is_ok()
+        && key
+            .set_value("IconUri", &icon.to_string_lossy().as_ref())
+            .is_ok()
         && key.set_value("IconBackgroundColor", &"FF17151F").is_ok();
     unsafe {
-        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("com.griz.dustling"));
+        let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!(
+            "com.griz.dustling"
+        ));
     }
     ok
 }

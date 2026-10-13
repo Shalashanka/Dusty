@@ -84,9 +84,15 @@ pub fn run_scan(app: &AppHandle, background: bool) {
 
     let settings = state.settings.read().clone();
 
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(if background { (threads / 2).max(2) } else { threads })
+        .num_threads(if background {
+            (threads / 2).max(2)
+        } else {
+            threads
+        })
         .thread_name(|i| format!("dustling-scan-{i}"))
         .start_handler(move |_| {
             if background {
@@ -124,7 +130,9 @@ pub fn run_scan(app: &AppHandle, background: bool) {
         .findings
         .read()
         .iter()
-        .filter(|f| settings.mode(f.kind) == Mode::Auto && f.suggested != crate::model::Action::Keep)
+        .filter(|f| {
+            settings.mode(f.kind) == Mode::Auto && f.suggested != crate::model::Action::Keep
+        })
         .map(|f| (f.id.clone(), f.suggested))
         .collect();
     let mut auto_count = 0;
@@ -162,7 +170,11 @@ pub fn run_scan(app: &AppHandle, background: bool) {
         let mut s = state.schedule.lock();
         let floor = settings.scan_floor_min as f64;
         let cap = settings.scan_cap_min as f64;
-        s.interval_min = if new_findings.is_empty() { (s.interval_min * 1.6).min(cap) } else { floor };
+        s.interval_min = if new_findings.is_empty() {
+            (s.interval_min * 1.6).min(cap)
+        } else {
+            floor
+        };
         s.next_due = now() + (s.interval_min * 60.0) as i64;
     }
 
@@ -182,10 +194,11 @@ fn maybe_nudge(app: &AppHandle, fresh: &[Finding], auto_count: usize, auto_freed
         return;
     }
     // Don't ping about things the user is looking at right now.
-    if let Some(w) = app.get_webview_window("main") {
-        if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
-            return;
-        }
+    if let Some(w) = app.get_webview_window("main")
+        && w.is_visible().unwrap_or(false)
+        && w.is_focused().unwrap_or(false)
+    {
+        return;
     }
     let (_, _, _, hour) = local_now();
     if s.is_quiet_hour(hour as u32) || winsys::user_state() != UserState::Available {
@@ -203,8 +216,13 @@ fn maybe_nudge(app: &AppHandle, fresh: &[Finding], auto_count: usize, auto_freed
     } else {
         toast::show(
             app,
-            &format!("I tidied up {} while you were away", human_bytes(auto_freed)),
-            &format!("{auto_count} things on autopilot. Everything is in your history if you want it back."),
+            &format!(
+                "I tidied up {} while you were away",
+                human_bytes(auto_freed)
+            ),
+            &format!(
+                "{auto_count} things on autopilot. Everything is in your history if you want it back."
+            ),
             false,
         );
     }
@@ -225,10 +243,21 @@ fn nudge_text(fresh: &[Finding], bytes: u64) -> (String, String) {
     };
     let age = (now() - star.last_touched) / crate::timeutil::DAY;
     let body = match star.kind {
-        Kind::DevJunk => format!("“{}” has been idle for {}. Want me to clear its build leftovers?", star.title, human_age(age)),
+        Kind::DevJunk => format!(
+            "“{}” has been idle for {}. Want me to clear its build leftovers?",
+            star.title,
+            human_age(age)
+        ),
         Kind::DesktopClutter => "Your desktop is getting crowded. Want me to sweep it?".into(),
-        Kind::Duplicate => format!("“{}” exists twice. Shall I recycle the extra copy?", star.title),
-        _ if star.last_touched > 0 => format!("Like “{}”, untouched for {}. Keep it?", star.title, human_age(age)),
+        Kind::Duplicate => format!(
+            "“{}” exists twice. Shall I recycle the extra copy?",
+            star.title
+        ),
+        _ if star.last_touched > 0 => format!(
+            "Like “{}”, untouched for {}. Keep it?",
+            star.title,
+            human_age(age)
+        ),
         _ => format!("Like “{}”. Want to take a look?", star.title),
     };
     (title, body)

@@ -1,0 +1,193 @@
+<script lang="ts">
+  import { House, Layers, ChartPie, History, SlidersHorizontal, Pause, Play } from "@lucide/svelte";
+  import { app, type View } from "$lib/app.svelte";
+  import { api } from "$lib/api";
+  import { clock } from "$lib/format";
+
+  const items: { id: View; label: string; icon: typeof House; key: string }[] = [
+    { id: "home", label: "Home", icon: House, key: "1" },
+    { id: "triage", label: "Tidy", icon: Layers, key: "2" },
+    { id: "space", label: "Space", icon: ChartPie, key: "3" },
+    { id: "history", label: "History", icon: History, key: "4" },
+    { id: "rules", label: "Rules", icon: SlidersHorizontal, key: "5" },
+  ];
+  const index = $derived(items.findIndex((i) => i.id === app.view));
+
+  async function togglePause() {
+    await api.pause(app.paused ? 0 : 180);
+    await app.refresh();
+    app.toast(app.paused ? `Napping until ${clock(app.snap!.pausedUntil)}. Wake me anytime.` : "I'm awake and watching again.");
+  }
+</script>
+
+<nav class="rail" data-tauri-drag-region>
+  <div class="logo" data-tauri-drag-region>
+    <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true">
+      <defs>
+        <radialGradient id="lg" cx="38%" cy="30%" r="75%">
+          <stop offset="0%" stop-color="#fff" /><stop offset="45%" stop-color="#d7cfff" /><stop offset="100%" stop-color="#7b6cf0" />
+        </radialGradient>
+      </defs>
+      <circle cx="20" cy="21" r="15" fill="url(#lg)" />
+      <ellipse cx="15.5" cy="20" rx="2.2" ry="3" fill="#1d1a2e" />
+      <ellipse cx="24.5" cy="20" rx="2.2" ry="3" fill="#1d1a2e" />
+      <path d="M17.5 26 q2.5 2.5 5 0" stroke="#1d1a2e" stroke-width="1.4" fill="none" stroke-linecap="round" />
+    </svg>
+  </div>
+
+  <div class="items">
+    <div class="pill" style="transform: translateY({index * 64}px)"></div>
+    {#each items as it (it.id)}
+      {@const Icon = it.icon}
+      <button class="item" class:active={app.view === it.id} onclick={() => app.go(it.id)} title="{it.label} ({it.key})">
+        <span class="icon">
+          <Icon size={20} strokeWidth={app.view === it.id ? 2.2 : 1.8} />
+          {#if it.id === "triage" && app.findings.length}
+            <span class="badge">{app.findings.length > 99 ? "99+" : app.findings.length}</span>
+          {/if}
+        </span>
+        <span class="label">{it.label}</span>
+      </button>
+    {/each}
+  </div>
+
+  <div class="bottom">
+    {#if app.scanning}
+      <div class="scanning" title={app.phase}><span></span><span></span><span></span></div>
+    {/if}
+    <button class="item small" onclick={togglePause} title={app.paused ? "Wake up" : "Pause for 3 hours"}>
+      <span class="icon">
+        {#if app.paused}<Play size={18} />{:else}<Pause size={18} />{/if}
+      </span>
+      <span class="label">{app.paused ? "Wake" : "Pause"}</span>
+    </button>
+  </div>
+</nav>
+
+<style>
+  .rail {
+    width: 84px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 0 16px;
+    gap: 18px;
+    border-right: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+  }
+  .logo {
+    height: 44px;
+    display: grid;
+    place-items: center;
+    filter: drop-shadow(0 4px 12px rgba(139, 124, 255, 0.5));
+  }
+  .items {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .pill {
+    position: absolute;
+    top: 0;
+    left: 6px;
+    width: 56px;
+    height: 60px;
+    border-radius: 16px;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    transition: transform 0.45s var(--spring);
+  }
+  .item {
+    position: relative;
+    width: 68px;
+    height: 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--text-2);
+    border-radius: 16px;
+    transition: color 0.2s;
+  }
+  .item:hover {
+    color: var(--text);
+  }
+  .item.active {
+    color: var(--accent);
+  }
+  .item:active .icon {
+    transform: scale(0.88);
+  }
+  .icon {
+    position: relative;
+    display: grid;
+    transition: transform 0.2s var(--spring);
+  }
+  .label {
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge {
+    position: absolute;
+    top: -7px;
+    left: 13px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 0 0 2px var(--bg-solid);
+    animation: pop 0.4s var(--spring);
+  }
+  @keyframes pop {
+    from {
+      transform: scale(0);
+    }
+  }
+  .bottom {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .item.small {
+    height: 52px;
+  }
+  .scanning {
+    display: flex;
+    gap: 4px;
+  }
+  .scanning span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: dot 1s ease-in-out infinite;
+  }
+  .scanning span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .scanning span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  @keyframes dot {
+    0%,
+    100% {
+      transform: translateY(0);
+      opacity: 0.4;
+    }
+    50% {
+      transform: translateY(-5px);
+      opacity: 1;
+    }
+  }
+</style>

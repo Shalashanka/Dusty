@@ -42,7 +42,12 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .on_tray_icon_event(|tray, e| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = e
+            {
                 let app = tray.app_handle();
                 crate::show_main(app);
                 let _ = app.emit("navigate", "home");
@@ -53,7 +58,9 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub fn refresh(app: &AppHandle) {
-    let Some(tray) = app.tray_by_id("main") else { return };
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
     let state = app.state::<AppState>();
     let (n, bytes) = state.pending();
     let paused = state.paused_until.load(Ordering::Relaxed) > now();
