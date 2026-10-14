@@ -859,6 +859,32 @@ pub fn voice_status(state: State<AppState>) -> crate::voice::VoiceStatus {
     crate::voice::status(&state.data_dir, &state.voice, &model)
 }
 
+#[tauri::command(async)]
+pub fn tts_models(state: State<AppState>) -> Vec<crate::speech::TtsModel> {
+    crate::speech::models(&state.data_dir)
+}
+
+#[tauri::command]
+pub async fn tts_download(app: AppHandle, model: String) -> R<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        crate::speech::download(&app, &state.data_dir, &state.speech, &model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Dusty says something with the chosen on-device voice.
+#[tauri::command(async)]
+pub fn say(app: AppHandle, text: String, lang: String) {
+    crate::speech::say(app, text, lang);
+}
+
+#[tauri::command(async)]
+pub fn say_stop(state: State<AppState>) {
+    crate::speech::stop(&state.speech);
+}
+
 #[tauri::command]
 pub async fn voice_download(app: AppHandle, model: String) -> R<()> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -883,6 +909,13 @@ pub fn voice_stop(state: State<AppState>) {
 #[tauri::command(async)]
 pub fn open_bar(app: AppHandle, mode: String) {
     crate::open_bar(&app, &mode);
+}
+
+/// The bar's content changed size or mode: morph the window to fit (logical px).
+#[tauri::command(async)]
+pub fn bar_fit(app: AppHandle, mode: String, height: f64) {
+    crate::set_bar_mode(&mode);
+    crate::bar::fit(&app, &mode, height);
 }
 
 /// Runs a palette command from the floating bar (no main window needed).

@@ -4,6 +4,38 @@ Everything requested so far, as things to try. Tick them off as you go.
 Tip: **Settings › About › tap the version 7 times** unlocks Developer mode,
 which can fire notifications, digests and scans on demand.
 
+## New in 0.3.1
+
+**Dusty feels alive**
+- [ ] Home: after a minute or so, Dusty sometimes leaves ("Out dusting the Downloads…", footprints); click the spot to call Dusty back (wave)
+- [ ] While away, Dusty sometimes sweeps past far in the background of the hero (small, hazy, painted sprite)
+- [ ] Pet Dusty 5 times quickly → a happy twirl
+- [ ] Late at night / early morning / Fridays, Dusty's thoughts change
+- [ ] The thought bubble no longer goes under the title bar fade
+- [ ] Desktop stroll: Dusty (painted sprite) walks in from one screen edge, says something mid-way, walks out the other edge; never pops up in place; first stroll only hours after install; off with Settings › Dusty's presence
+
+**Voice bar**
+- [ ] `Ctrl+Alt+D`: the listening pill sits low and centred on the screen, not in the middle
+- [ ] Words appear one by one while you speak
+- [ ] When you stop, the pill floats up and morphs into the search bar with your words typed and results open
+- [ ] No microphone (e.g. Remote Desktop without "Record from this computer"): a clear explanation instead of "no microphone found"
+- [ ] Search and commands open at the same spot; `>` or Backspace morphs one into the other in place
+
+**Dusty's voice** (Settings › Voice › Dusty's voice)
+- [ ] Download Supertonic 3 (~130 MB) → plays a sample; Italian queries get Italian answers
+- [ ] Kokoro (warmest, slower) and Kitten nano (tiny) download and play; Windows voices still selectable
+- [ ] With "Answer out loud" on, a voice query gets a one-line spoken answer; Esc stops it
+
+**Search in more languages**
+- [ ] Spanish: "busca las fotos de vacaciones de hace 3 meses"
+- [ ] French: "trouve les factures pdf de la semaine dernière"
+- [ ] German: "zeige mir große Videos auf d:", "Rechnung vor 2 Monaten"
+- [ ] Portuguese: "encontre os documentos de ontem"
+
+**Tidy**
+- [ ] Switching drives in Tidy (list view) is instant and doesn't load the PC; long groups show "Show N more"
+- [ ] Thumbnails load as you scroll, a few at a time
+
 ## New in 0.3.0
 
 **Updates**

@@ -1,4 +1,5 @@
 mod actions;
+pub mod bar;
 mod buddy;
 mod commands;
 mod detect;
@@ -13,6 +14,7 @@ mod nlq;
 mod organize;
 mod scheduler;
 mod settings;
+mod speech;
 mod state;
 mod store;
 mod thumbs;
@@ -52,8 +54,12 @@ pub fn open_bar(app: &AppHandle, mode: &str) {
         let _ = w.hide();
         return;
     }
+    let was_visible = w.is_visible().unwrap_or(false);
     *BAR_MODE.lock() = mode.to_string();
-    let _ = w.center();
+    // Already open: the page morphs in place (bar::fit). Otherwise start where the mode lives.
+    if !was_visible {
+        bar::snap(app, mode, if mode == "commands" { 470.0 } else { 112.0 });
+    }
     let _ = w.show();
     let _ = w.set_focus();
     let _ = app.emit_to("search", "search-open", mode);
@@ -70,6 +76,10 @@ pub fn open_bar(app: &AppHandle, mode: &str) {
 }
 
 static BAR_MODE: parking_lot::Mutex<String> = parking_lot::Mutex::new(String::new());
+
+pub fn set_bar_mode(mode: &str) {
+    *BAR_MODE.lock() = mode.to_string();
+}
 /// Shortcut id -> bar mode.
 static HOTKEYS: parking_lot::Mutex<Vec<(u32, &'static str)>> = parking_lot::Mutex::new(Vec::new());
 
@@ -237,6 +247,11 @@ pub fn run() {
             commands::voice_listen,
             commands::voice_stop,
             commands::open_bar,
+            commands::bar_fit,
+            commands::tts_models,
+            commands::tts_download,
+            commands::say,
+            commands::say_stop,
             commands::bar_command,
             commands::buddy_done,
             commands::buddy_test,

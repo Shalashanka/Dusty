@@ -115,6 +115,8 @@ const settings: Settings = {
   voiceEnabled: true,
   voiceModel: "moonshine",
   voiceReply: false,
+  ttsModel: "supertonic",
+  ttsSpeaker: -1,
   voiceHotkey: "Ctrl+Alt+D",
   paletteHotkey: "Ctrl+Alt+K",
   wander: true,
@@ -237,12 +239,18 @@ export function installMocks() {
           return { scheduled: true, lastRun: new Date(Date.now() - 3 * DAY * 1000).toISOString() };
         case "voice_status":
           return {
-            model: "moonshine", installed: true, sizeMb: 103, downloading: false, listening: false, hasMic: true,
+            model: "moonshine", installed: true, sizeMb: 103, downloading: false, listening: false, hasMic: true, micHint: "",
             models: [
               { id: "moonshine", name: "Moonshine (fast, English)", sizeMb: 103, languages: "English", installed: true },
               { id: "parakeet", name: "Parakeet v3 (25 languages)", sizeMb: 640, languages: "English, Italian, Spanish, French, German and 20 more", installed: false },
             ],
           };
+        case "tts_models":
+          return [
+            { id: "supertonic", name: "Supertonic 3", blurb: "Lightning fast and natural. Speaks Italian too.", sizeMb: 129, languages: "31 languages", installed: true },
+            { id: "kokoro", name: "Kokoro", blurb: "The warmest English voice. Takes a few seconds to answer.", sizeMb: 132, languages: "English", installed: false },
+            { id: "kitten", name: "Kitten nano", blurb: "Tiny and quick. Good on older PCs.", sizeMb: 31, languages: "English", installed: false },
+          ];
         case "check_update":
           return { current: "0.3.0", available: null, notes: "", date: "", source: "C:\dev\Dusty\releases" };
         case "app_info":

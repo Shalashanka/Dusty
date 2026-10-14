@@ -92,39 +92,133 @@ fn type_exts(word: &str) -> Option<(&'static str, &'static [&'static str])> {
 
 /// Groups of words that mean the same thing when looking for files.
 const SYNONYMS: &[&[&str]] = &[
-    &["invoice", "fattura", "bill", "receipt", "ricevuta", "fatt"],
-    &["contract", "contratto", "agreement", "accordo"],
-    &["resume", "cv", "curriculum"],
-    &["tax", "taxes", "tasse", "f24", "730", "irpef"],
-    &["bank", "banca", "statement", "estratto"],
-    &["holiday", "holidays", "vacation", "vacanza", "vacanze", "trip", "viaggio", "travel"],
-    &["wedding", "matrimonio", "sposi"],
-    &["birthday", "compleanno", "bday"],
-    &["passport", "passaporto"],
-    &["id card", "carta identita", "documento identita"],
-    &["screenshot", "screen", "schermata", "cattura", "snip"],
-    &["backup", "bak", "bkp", "copia"],
-    &["meeting", "riunione", "call"],
-    &["notes", "note", "appunti"],
-    &["report", "relazione", "rapporto"],
-    &["project", "progetto"],
+    &["invoice", "fattura", "bill", "receipt", "ricevuta", "fatt", "factura", "facture", "rechnung", "fatura", "recibo", "quittung"],
+    &["contract", "contratto", "agreement", "accordo", "contrato", "contrat", "vertrag"],
+    &["resume", "cv", "curriculum", "lebenslauf", "curriculo"],
+    &["tax", "taxes", "tasse", "f24", "730", "irpef", "impuestos", "impots", "steuer", "steuern", "impostos"],
+    &["bank", "banca", "statement", "estratto", "banco", "banque", "kontoauszug", "extracto", "releve"],
+    &[
+        "holiday", "holidays", "vacation", "vacanza", "vacanze", "trip", "viaggio", "travel", "vacaciones", "viaje", "vacances",
+        "voyage", "urlaub", "reise", "ferias", "viagem",
+    ],
+    &["wedding", "matrimonio", "sposi", "boda", "mariage", "hochzeit", "casamento"],
+    &["birthday", "compleanno", "bday", "cumpleanos", "anniversaire", "geburtstag", "aniversario"],
+    &["passport", "passaporto", "pasaporte", "passeport", "reisepass", "passaporte"],
+    &["id card", "carta identita", "documento identita", "personalausweis", "carte identite", "dni"],
+    &["screenshot", "screen", "schermata", "cattura", "snip", "captura", "capture", "bildschirmfoto"],
+    &["backup", "bak", "bkp", "copia", "sauvegarde", "sicherung"],
+    &["meeting", "riunione", "call", "reunion", "besprechung", "reuniao"],
+    &["notes", "note", "appunti", "notas", "notizen", "apuntes"],
+    &["report", "relazione", "rapporto", "informe", "rapport", "bericht", "relatorio"],
+    &["project", "progetto", "proyecto", "projet", "projekt", "projeto"],
     &["logo", "logos", "loghi"],
-    &["insurance", "assicurazione", "polizza"],
-    &["salary", "payslip", "busta paga", "cedolino", "stipendio"],
+    &["insurance", "assicurazione", "polizza", "seguro", "assurance", "versicherung"],
+    &[
+        "salary", "payslip", "busta paga", "cedolino", "stipendio", "nomina", "salaire", "gehalt", "gehaltsabrechnung", "salario",
+        "holerite",
+    ],
+    &["recipe", "ricetta", "receta", "recette", "rezept", "receita"],
+    &["car", "macchina", "coche", "voiture", "carro"],
+    &["school", "scuola", "escuela", "ecole", "schule", "escola"],
 ];
+
+/// Spanish, French, German and Portuguese words that steer the parser, mapped to
+/// the English word it already understands. Search terms themselves are matched
+/// through SYNONYMS, stems and accent folding instead.
+fn translate(w: &str) -> Option<&'static str> {
+    Some(match w {
+        // verbs, articles & fillers -> become stop words
+        "busca" | "buscar" | "buscame" | "encuentra" | "encuentrame" | "muestra" | "muestrame" | "donde" | "esta" | "estan"
+        | "trouve" | "trouver" | "trouvez" | "cherche" | "chercher" | "montre" | "montrez" | "moi" | "ou" | "sont" | "finde"
+        | "finden" | "suche" | "suchen" | "zeig" | "zeige" | "zeigen" | "mir" | "wo" | "ist" | "sind" | "encontre"
+        | "encontrar" | "procure" | "procurar" | "mostre" | "mostrar" | "onde" | "quero" | "quiero" | "veux" | "bitte"
+        | "por" | "favor" | "svp" | "los" | "las" | "les" | "der" | "die" | "das" | "den" | "dem" | "meine" | "mein"
+        | "meinen" | "meiner" | "os" | "mis" | "mon" | "ma" | "meu" | "minha" | "meus" | "minhas" | "y" | "und" | "et"
+        | "oder" | "ich" | "je" | "yo" | "eu" | "habe" | "tengo" | "tenho" | "ai" | "des" | "du" | "von" | "vom" | "do"
+        | "dos" | "aus" | "de" => "the",
+        // places & prepositions
+        "en" | "dans" | "im" | "no" | "na" | "nos" | "nas" => "in",
+        "sur" | "auf" => "on",
+        "con" | "avec" | "mit" | "com" => "with",
+        // time
+        "hoy" | "aujourd" | "heute" | "hoje" => "today",
+        "ayer" | "hier" | "gestern" | "ontem" => "yesterday",
+        "letzte" | "letzten" | "letzter" | "letztes" | "ultimos" | "ultimas" | "últimos" | "últimas" | "derniers"
+        | "dernieres" | "dernières" => "last",
+        "este" | "cette" | "ce" | "diese" | "diesen" | "dieses" | "dieser" | "neste" | "nesta" => "this",
+        // size & age
+        "grande" | "grandes" | "gros" | "grosse" | "grosses" | "grand" | "grands" | "gross" | "große" | "großen"
+        | "grossen" | "riesig" | "riesige" => "big",
+        "pequeno" | "pequenos" | "pequena" | "pequenas" | "pequeño" | "pequeños" | "petit" | "petits" | "petite"
+        | "petites" | "klein" | "kleine" | "kleinen" => "small",
+        "viejo" | "viejos" | "vieja" | "viejas" | "antiguo" | "antiguos" | "antigua" | "antiguas" | "vieux" | "vieille"
+        | "vieilles" | "ancien" | "anciens" | "alt" | "alte" | "alten" | "velho" | "velhos" | "antigo" | "antigos" => "old",
+        "reciente" | "recientes" | "nuevo" | "nuevos" | "recents" | "récents" | "nouveau" | "nouveaux" | "neu" | "neue"
+        | "neuen" | "recentes" | "novo" | "novos" => "recent",
+        "mas" | "más" | "plus" | "mehr" | "mais" | "über" | "uber" => "over",
+        "menos" | "moins" | "weniger" | "unter" => "under",
+        "que" | "als" => "than",
+        // kinds of things
+        "carpeta" | "carpetas" | "dossier" | "dossiers" | "ordner" | "verzeichnis" => "folder",
+        "imagen" | "imagenes" | "imágenes" | "fotos" | "bilder" | "bild" | "imagens" => "photos",
+        "musica" | "música" | "canciones" | "cancion" | "musique" | "chansons" | "musik" | "lieder" | "musicas" => "music",
+        "pelicula" | "peliculas" | "película" | "películas" | "filme" | "filmes" | "vidéo" | "vidéos" => "movies",
+        "presentacion" | "presentaciones" | "presentación" | "präsentation" | "apresentacao" => "presentations",
+        "hoja" | "hojas" | "tabelle" | "tabellen" | "planilha" | "planilhas" | "tableur" => "spreadsheet",
+        "instalador" | "instaladores" | "installateur" | "installationsprogramm" => "installer",
+        "comprimido" | "comprimidos" => "zip",
+        "documentos" | "dokumente" | "dokument" => "documents",
+        "descargas" | "telechargements" | "téléchargements" | "transferencias" | "transferências" => "downloads",
+        "escritorio" | "bureau" | "schreibtisch" => "desktop",
+        _ => return None,
+    })
+}
+
+/// Rewrites foreign phrasing into words the parser knows: "hace 5 meses",
+/// "il y a 5 mois", "vor 5 Monaten", "há 5 meses" -> "5 months ago".
+fn localize(words: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        let w = words[i].as_str();
+        let at = |k: usize| words.get(k).map(|s| s.as_str()).unwrap_or("");
+        let french_ago = w == "il" && at(i + 1) == "y" && at(i + 2) == "a";
+        let skip = if french_ago {
+            3
+        } else if matches!(w, "hace" | "vor" | "há" | "faz") {
+            1
+        } else {
+            0
+        };
+        if skip > 0 {
+            let (n, u) = (at(i + skip), at(i + skip + 1));
+            if number_word(n).is_some() && unit_days(u).is_some() {
+                out.extend([n.to_string(), u.to_string(), "ago".to_string()]);
+                i += skip + 2;
+                continue;
+            }
+        }
+        // Numbers stay numbers when a unit follows ("un mes", "eine Woche").
+        let keep = number_word(w).is_some() && unit_days(at(i + 1)).is_some();
+        let mapped = if keep { None } else { translate(w) };
+        out.push(mapped.map(|m| m.to_string()).unwrap_or_else(|| w.to_string()));
+        i += 1;
+    }
+    out
+}
 
 fn number_word(w: &str) -> Option<f64> {
     Some(match w {
-        "a" | "an" | "one" | "uno" | "una" | "un" => 1.0,
-        "two" | "due" | "couple" => 2.0,
-        "three" | "tre" | "few" => 3.0,
-        "four" | "quattro" => 4.0,
-        "five" | "cinque" => 5.0,
-        "six" | "sei" => 6.0,
-        "seven" | "sette" => 7.0,
-        "eight" | "otto" => 8.0,
-        "nine" | "nove" => 9.0,
-        "ten" | "dieci" => 10.0,
+        "a" | "an" | "one" | "uno" | "una" | "un" | "une" | "ein" | "eine" | "einem" | "einer" | "um" => 1.0,
+        "two" | "due" | "couple" | "dos" | "deux" | "zwei" | "dois" | "duas" => 2.0,
+        "three" | "tre" | "few" | "tres" | "trois" | "drei" => 3.0,
+        "four" | "quattro" | "cuatro" | "quatre" | "vier" | "quatro" => 4.0,
+        "five" | "cinque" | "cinco" | "cinq" | "funf" | "fünf" => 5.0,
+        "six" | "sei" | "seis" | "sechs" => 6.0,
+        "seven" | "sette" | "siete" | "sept" | "sieben" | "sete" => 7.0,
+        "eight" | "otto" | "ocho" | "huit" | "acht" | "oito" => 8.0,
+        "nine" | "nove" | "nueve" | "neuf" | "neun" => 9.0,
+        "ten" | "dieci" | "diez" | "dix" | "zehn" | "dez" => 10.0,
         "eleven" | "undici" => 11.0,
         "twelve" | "dodici" => 12.0,
         "fifteen" | "quindici" => 15.0,
@@ -136,10 +230,11 @@ fn number_word(w: &str) -> Option<f64> {
 
 fn unit_days(w: &str) -> Option<i64> {
     Some(match w {
-        "day" | "days" | "giorno" | "giorni" => 1,
-        "week" | "weeks" | "settimana" | "settimane" => 7,
-        "month" | "months" | "mese" | "mesi" => 30,
-        "year" | "years" | "anno" | "anni" => 365,
+        "day" | "days" | "giorno" | "giorni" | "dia" | "dias" | "día" | "días" | "jour" | "jours" | "tag" | "tage" | "tagen" => 1,
+        "week" | "weeks" | "settimana" | "settimane" | "semana" | "semanas" | "semaine" | "semaines" | "woche" | "wochen" => 7,
+        "month" | "months" | "mese" | "mesi" | "mes" | "meses" | "mês" | "mois" | "monat" | "monate" | "monaten" => 30,
+        "year" | "years" | "anno" | "anni" | "año" | "años" | "ano" | "anos" | "ans" | "année" | "années" | "annee"
+        | "annees" | "jahr" | "jahre" | "jahren" => 365,
         _ => return None,
     })
 }
@@ -262,6 +357,7 @@ pub fn parse(input: &str) -> Query {
         .map(|w| w.trim_end_matches('.').to_string())
         .filter(|w| !w.is_empty())
         .collect();
+    let words = localize(words);
     let fuzzy = ["roughly", "about", "around", "approx", "circa", "più o meno"].iter().any(|k| lower.contains(k));
     let mut used = vec![false; words.len()];
     let w_at = |i: usize| words.get(i).map(|s| s.as_str()).unwrap_or("");
@@ -299,7 +395,7 @@ pub fn parse(input: &str) -> Query {
         let smaller_words = ["smaller", "under", "below", "<", "meno", "sotto", "minore"];
         if bigger_words.contains(&w) || smaller_words.contains(&w) {
             let mut j = i + 1;
-            if matches!(w_at(j), "than" | "di" | "dei" | "a") {
+            if matches!(w_at(j), "than" | "the" | "di" | "dei" | "a" | "de" | "que" | "als") {
                 j += 1;
             }
             let tok = w_at(j).to_string();
@@ -394,7 +490,12 @@ pub fn parse(input: &str) -> Query {
                 i += 2;
                 continue;
             }
-            _ if unit_days(w).is_some() && matches!(next, "scorso" | "scorsa" | "passato" | "passata") => {
+            _ if unit_days(w).is_some()
+                && matches!(
+                    next,
+                    "scorso" | "scorsa" | "passato" | "passata" | "pasado" | "pasada" | "dernier" | "dernière" | "derniere" | "passado" | "passada"
+                ) =>
+            {
                 let d = unit_days(w).unwrap();
                 q.after = Some(t - 2 * d * DAY);
                 q.before = Some(t - d * DAY / 2);
@@ -766,6 +867,25 @@ mod tests {
         assert_eq!(q.location, vec!["documents"]);
         assert_eq!(q.min_size, Some(1_048_576));
         assert!(q.alts[0].contains(&"invoic".to_string()), "{:?}", q.alts);
+    }
+
+    #[test]
+    fn understands_more_languages() {
+        let es = parse("busca las fotos de vacaciones de hace 3 meses");
+        assert!(es.exts.contains(&"jpg".to_string()), "{:?}", es);
+        assert!(es.after.is_some() && es.before.is_some(), "{:?}", es);
+        assert!(es.terms.iter().any(|t| t == "vacaciones"), "{:?}", es);
+        let fr = parse("trouve les factures pdf de la semaine dernière");
+        assert!(fr.exts.contains(&"pdf".to_string()) && fr.after.is_some(), "{:?}", fr);
+        let de = parse("zeige mir große Videos auf d:");
+        assert!(de.min_size.is_some() && de.location.contains(&"d:".to_string()), "{:?}", de);
+        let de2 = parse("Rechnung vor 2 Monaten");
+        assert!(de2.after.is_some() && de2.terms == vec!["rechnung"], "{:?}", de2);
+        let pt = parse("encontre os documentos de ontem");
+        assert!(pt.after.is_some() && pt.files_only, "{:?}", pt);
+        // Foreign words reach files named in other languages.
+        let alts = alternatives("vacaciones");
+        assert!(alts.iter().any(|a| a.starts_with("holiday") || a.starts_with("vacanz")), "{:?}", alts);
     }
 
     #[test]

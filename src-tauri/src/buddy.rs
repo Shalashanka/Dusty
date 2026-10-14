@@ -26,7 +26,7 @@ pub fn stroll(app: &AppHandle, message: &str, mood: &str) {
     }
     let _ = w.set_ignore_cursor_events(true);
     let _ = w.set_focusable(false);
-    let _ = w.show();
+    // The page shows the window itself once Dusty is parked off-screen.
     let _ = app.emit_to("buddy", "buddy-stroll", Stroll { message: message.into(), mood: mood.into() });
     app.state::<AppState>().store.set("last_stroll", &now().to_string());
 }
@@ -50,8 +50,14 @@ pub fn maybe_stroll(app: &AppHandle) {
         return;
     }
     // ~every 2-3 hours, a bit random so it feels alive rather than scheduled.
+    // Never right after install or start-up: the first pass waits a full gap.
+    let last = state.store.get_i64("last_stroll");
+    if last == 0 {
+        state.store.set("last_stroll", &now().to_string());
+        return;
+    }
     let gap = 2 * 3600 + (now() % 3600);
-    if now() - state.store.get_i64("last_stroll") < gap {
+    if now() - last < gap {
         return;
     }
     let (n, bytes) = state.pending();

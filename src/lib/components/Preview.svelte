@@ -1,3 +1,25 @@
+<script module lang="ts">
+  /** Shell thumbnails are expensive: at most a few in flight, newest-visible first. */
+  const MAX_INFLIGHT = 3;
+  let inflight = 0;
+  const waiting: (() => void)[] = [];
+  function slot(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const go = () => {
+        inflight++;
+        let released = false;
+        resolve(() => {
+          if (released) return;
+          released = true;
+          inflight--;
+          waiting.shift()?.();
+        });
+      };
+      inflight < MAX_INFLIGHT ? go() : waiting.push(go);
+    });
+  }
+</script>
+
 <script lang="ts">
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { fade } from "svelte/transition";
@@ -18,6 +40,23 @@
   let thumb = $state<string | null>(null);
   let text = $state<string | null>(null);
   let failed = $state(false);
+  /** Small previews in long lists only load once they scroll into view. */
+  let host = $state<HTMLElement>();
+  let visible = $state(false);
+  $effect(() => {
+    if (rich || !host) {
+      visible = true;
+      return;
+    }
+    const io = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) {
+        visible = true;
+        io.disconnect();
+      }
+    }, { rootMargin: "200px" });
+    io.observe(host);
+    return () => io.disconnect();
+  });
 
   const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const src = $derived(inTauri && /^[a-z]:\\/i.test(path) ? convertFileSrc(path) : "");
@@ -27,14 +66,23 @@
     text = null;
     failed = false;
     const p = path;
-    if (!inTauri || !/^[a-z]:\\/i.test(p)) return;
+    if (!inTauri || !/^[a-z]:\\/i.test(p) || !visible) return;
+    let alive = true;
     if (rich && kind === "text") {
       api.readText(p, 6000).then((t) => (text = t)).catch(() => (failed = true));
     }
     // Windows shell thumbnails cover everything else (PSD, video frames, folders...).
     if (!rich || !kind || kind === "pdf" || kind === "text") {
-      api.thumbnail(p, rich ? 512 : 160).then((t) => (thumb = t));
+      slot().then((release) => {
+        if (!alive) return release();
+        api
+          .thumbnail(p, rich ? 512 : 160)
+          .then((t) => alive && (thumb = t))
+          .catch(() => {})
+          .finally(release);
+      });
     }
+    return () => (alive = false);
   });
 </script>
 
@@ -55,10 +103,14 @@
 {:else if thumb}
   <img class="thumb" class:rich src={thumb} alt="" style={rich ? "" : `width:${size}px;height:${size}px`} in:fade={{ duration: 200 }} />
 {:else}
-  <FileGlyph {ext} {isDir} {size} {color} />
+  <span class="glyph" bind:this={host}><FileGlyph {ext} {isDir} {size} {color} /></span>
 {/if}
 
 <style>
+  .glyph {
+    display: inline-flex;
+    flex: none;
+  }
   .thumb {
     border-radius: calc(var(--r) - 2px);
     object-fit: cover;

@@ -121,6 +121,12 @@ pub struct Settings {
     pub voice_model: String,
     /// Read answers out loud (off by default).
     pub voice_reply: bool,
+    /// Dusty's speaking voice: "supertonic" | "kokoro" | "kitten" | "system" (Windows voices).
+    #[serde(default = "default_tts")]
+    pub tts_model: String,
+    /// Speaker within the model; -1 = the model's default.
+    #[serde(default = "minus_one")]
+    pub tts_speaker: i32,
     pub voice_hotkey: String,
     pub palette_hotkey: String,
     /// Dusty sometimes strolls along the bottom of the screen while working.
@@ -277,6 +283,8 @@ impl Default for Settings {
             voice_enabled: false,
             voice_model: "moonshine".into(),
             voice_reply: false,
+            tts_model: default_tts(),
+            tts_speaker: -1,
             voice_hotkey: "Ctrl+Alt+D".into(),
             palette_hotkey: "Ctrl+Alt+K".into(),
             wander: true,
@@ -371,4 +379,12 @@ mod tests {
         assert!(s.in_mirror(r"g:\backup\photos\2023\a.jpg"));
         assert!(!s.in_mirror(r"D:\PhotosOld\a.jpg"));
     }
+}
+
+fn default_tts() -> String {
+    "supertonic".into()
+}
+
+fn minus_one() -> i32 {
+    -1
 }

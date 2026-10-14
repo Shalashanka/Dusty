@@ -39,6 +39,7 @@ pub struct AppState {
     /// When the current scan started (0 when idle).
     pub scan_started: AtomicI64,
     pub voice: crate::voice::VoiceState,
+    pub speech: crate::speech::SpeechState,
 }
 
 impl AppState {
@@ -71,6 +72,7 @@ impl AppState {
             live_procs: AtomicBool::new(false),
             scan_started: AtomicI64::new(0),
             voice: Default::default(),
+            speech: Default::default(),
         }
     }
 

@@ -3,11 +3,11 @@
   import { cubicOut } from "svelte/easing";
   import { ArrowRight, RefreshCw, HardDrive, Sparkles, Flame, CalendarCheck, Leaf, Trash2, Search, Database } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import Mascot, { type Mood } from "$lib/components/Mascot.svelte";
+  import type { Mood } from "$lib/components/Mascot.svelte";
+  import Presence from "$lib/components/Presence.svelte";
   import Counter from "$lib/components/Counter.svelte";
   import Ring from "$lib/components/Ring.svelte";
   import DriveChips from "$lib/components/DriveChips.svelte";
-  import ThoughtBubble from "$lib/components/ThoughtBubble.svelte";
   import DustMotes from "$lib/components/DustMotes.svelte";
   import { app } from "$lib/app.svelte";
   import { api, type Kind, type Finding } from "$lib/api";
@@ -44,6 +44,10 @@
     if (app.index?.ready) t.push(`I know where all ${(app.index.entries / 1e6).toFixed(1)}M files are. Try ${app.settings?.searchHotkey}!`);
     if (app.settings && !app.settings.voiceEnabled) t.push("Psst, you can talk to me now. Settings › Voice 🎙");
     if (app.bin[0] > 1 << 30) t.push(`The Recycle Bin is holding ${bytes(app.bin[0])}…`);
+    const hour = new Date().getHours();
+    if (hour >= 23 || hour < 5) t.push("It's late… *yawn*. Don't forget to sleep 🌙");
+    else if (hour < 9) t.push("Morning! Coffee first, then files ☕");
+    if (new Date().getDay() === 5) t.push("Friday! Perfect day for a tiny cleanup 🎉");
     t.push("I'll tidy up while you're away.", "Humming while I dust… 🎵", "Pet me, I don't bite 🧹");
     return t;
   });
@@ -97,8 +101,7 @@
   <DustMotes />
   <section class="hero" in:fade={{ duration: 300 }}>
     <div class="mascot-wrap">
-      <ThoughtBubble lines={thoughts} />
-      <Mascot {mood} size={180} />
+      <Presence {mood} {thoughts} />
     </div>
     <div class="copy">
       <p class="hello">{greeting()}</p>
@@ -265,17 +268,23 @@
   .home {
     position: relative;
     height: 100%;
-    padding: 42px 40px 60px;
+    padding: 20px 40px 60px;
   }
   .hero {
+    position: relative;
+    container-type: inline-size;
     display: flex;
     align-items: center;
     gap: 30px;
-    padding: 0 0 22px;
+    padding: 44px 0 22px;
   }
+  /* Static on purpose: Dusty's distant walk is positioned against the hero. */
   .mascot-wrap {
     flex: none;
+  }
+  .copy {
     position: relative;
+    z-index: 1;
   }
   .home > :global(:not(.motes)) {
     position: relative;

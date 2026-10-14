@@ -144,6 +144,8 @@ export interface Settings {
   voiceEnabled: boolean;
   voiceModel: string;
   voiceReply: boolean;
+  ttsModel: string;
+  ttsSpeaker: number;
   voiceHotkey: string;
   paletteHotkey: string;
   wander: boolean;
@@ -355,6 +357,15 @@ export interface VoiceModel {
   installed: boolean;
 }
 
+export interface TtsModel {
+  id: string;
+  name: string;
+  blurb: string;
+  sizeMb: number;
+  languages: string;
+  installed: boolean;
+}
+
 export interface VoiceStatus {
   model: string;
   installed: boolean;
@@ -362,6 +373,7 @@ export interface VoiceStatus {
   downloading: boolean;
   listening: boolean;
   hasMic: boolean;
+  micHint: string;
   models: VoiceModel[];
 }
 
@@ -377,6 +389,11 @@ export const api = {
   voiceListen: () => invoke<void>("voice_listen"),
   voiceStop: () => invoke<void>("voice_stop"),
   openBar: (mode: "search" | "commands" | "voice") => invoke<void>("open_bar", { mode }),
+  ttsModels: () => invoke<TtsModel[]>("tts_models"),
+  ttsDownload: (model: string) => invoke<void>("tts_download", { model }),
+  say: (text: string, lang: string) => invoke<void>("say", { text, lang }),
+  sayStop: () => invoke<void>("say_stop"),
+  barFit: (mode: "search" | "commands" | "voice", height: number) => invoke<void>("bar_fit", { mode, height }),
   barCommand: (cmd: string) => invoke<string>("bar_command", { cmd }),
   buddyDone: () => invoke<void>("buddy_done"),
   buddyTest: (message?: string) => invoke<void>("buddy_test", { message }),

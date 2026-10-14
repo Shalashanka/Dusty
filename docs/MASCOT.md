@@ -71,6 +71,11 @@ quarter view, consistent size and baseline, transparent background, 4096x512.
 
 ## 5. Hand-off
 
+In use today: `src/lib/assets/mascot/walk.webp`, an 8-frame walk-and-sweep sheet (324 px cells,
+facing right) cut from the painted sprite in `assets/mascot/walk-source.png`. It drives the desktop
+stroll and Dusty's distant passes on Home (`WalkSprite.svelte`).
+
+
 Drop the files into `src/lib/assets/mascot/` (`hero.png`, `body.png`, `scarf.png`,
 `eyes-open.png`, `eyes-closed.png`, `mouth-*.png`, `broom.png`, `shadow.png`, or `walk.png`
 sprite sheet). The current SVG mascot (`src/lib/components/Mascot.svelte`) is built from the

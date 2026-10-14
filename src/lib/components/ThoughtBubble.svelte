@@ -43,7 +43,7 @@
     bottom: 90%;
     z-index: 3;
     width: max-content;
-    max-width: 220px;
+    max-width: 250px;
     padding: 9px 13px;
     border-radius: 16px;
     background: color-mix(in srgb, var(--bg-solid) 88%, white 12%);

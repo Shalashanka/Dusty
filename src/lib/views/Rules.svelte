@@ -27,12 +27,13 @@
     Mic,
     Footprints,
     RefreshCw,
+    Play,
   } from "@lucide/svelte";
   import Segmented from "$lib/components/Segmented.svelte";
   import Toggle from "$lib/components/Toggle.svelte";
   import Mascot from "$lib/components/Mascot.svelte";
   import { app } from "$lib/app.svelte";
-  import { api, type AppInfo, type Kind, type Mode, type PolicyMode, type Protected, type Settings, type UpdateInfo, type VoiceStatus } from "$lib/api";
+  import { api, type AppInfo, type Kind, type Mode, type PolicyMode, type Protected, type Settings, type TtsModel, type UpdateInfo, type VoiceStatus } from "$lib/api";
   import { listen } from "@tauri-apps/api/event";
   import { KINDS, KIND_ORDER } from "$lib/kinds";
   import { ago, shortPath } from "$lib/format";
@@ -48,6 +49,8 @@
   let recording = $state<HotkeyField | null>(null);
   let voice = $state<VoiceStatus | null>(null);
   let voiceProgress = $state<number | null>(null);
+  let ttsModels = $state<TtsModel[]>([]);
+  let ttsProgress = $state<{ id: string; p: number } | null>(null);
   let update = $state<UpdateInfo | null>(null);
   let updateError = $state("");
   let checking = $state(false);
@@ -60,7 +63,32 @@
     protectedList = await api.protectedList();
     voice = await api.voiceStatus().catch(() => null);
     await listen<number>("voice-download", (e) => (voiceProgress = e.payload));
+    ttsModels = await api.ttsModels().catch(() => []);
+    await listen<number>("tts-download", (e) => ttsProgress && (ttsProgress = { ...ttsProgress, p: e.payload }));
   });
+
+  async function downloadTts(id: string) {
+    ttsProgress = { id, p: 0 };
+    try {
+      await api.ttsDownload(id);
+      patch({ ttsModel: id, voiceReply: true });
+      tryVoice(id);
+    } catch (e) {
+      app.toast(String(e), { tone: "error" });
+    } finally {
+      ttsProgress = null;
+      ttsModels = await api.ttsModels().catch(() => ttsModels);
+    }
+  }
+  function tryVoice(id = s.ttsModel) {
+    if (id === "system") {
+      const u = new SpeechSynthesisUtterance("Hi! I'm Dusty. I found three invoices from March.");
+      u.voice = speechSynthesis.getVoices().find((v) => v.localService && v.lang.startsWith("en")) ?? null;
+      speechSynthesis.speak(u);
+    } else {
+      setTimeout(() => api.say("Hi! I'm Dusty. I found three invoices from March. The top one is in Downloads.", "en"), 150);
+    }
+  }
 
   async function downloadVoice(model: string) {
     voiceProgress = 0;
@@ -481,7 +509,38 @@
                 {/if}
               </div>
             {/each}
-            <div class="srow"><div><b>Answer out loud</b><span class="faint">A short spoken summary of what I found, with Windows' local voices. Off by default.</span></div><span></span><Toggle checked={s.voiceReply} onchange={(v) => patch({ voiceReply: v })} /></div>
+            <div class="srow"><div><b>Answer out loud</b><span class="faint">A short spoken summary of what I found. Off by default.</span></div><span></span><Toggle checked={s.voiceReply} onchange={(v) => patch({ voiceReply: v })} /></div>
+          </div>
+
+          <h3 class="sub">Dusty's voice</h3>
+          <p class="faint hint">Small neural voices that run on this PC, downloaded once. Pick one and press play.</p>
+          <div class="card settings">
+            {#each ttsModels as m (m.id)}
+              <div class="srow">
+                <div><b>{m.name}</b><span class="faint">{m.blurb} {m.languages} · {m.sizeMb} MB</span></div>
+                <span>
+                  {#if ttsProgress?.id === m.id}
+                    <span class="bar"><i style="width:{Math.round(ttsProgress.p * 100)}%"></i></span>
+                  {/if}
+                </span>
+                {#if m.installed}
+                  <span class="vbtns">
+                    <button class="btn sm ghost" title="Hear it" onclick={() => { patch({ ttsModel: m.id }); tryVoice(m.id); }}><Play size={13} /></button>
+                    {#if s.ttsModel === m.id}<span class="chip on">In use</span>{:else}<button class="btn sm" onclick={() => patch({ ttsModel: m.id })}>Use</button>{/if}
+                  </span>
+                {:else}
+                  <button class="btn sm" disabled={ttsProgress !== null} onclick={() => downloadTts(m.id)}>Download</button>
+                {/if}
+              </div>
+            {/each}
+            <div class="srow">
+              <div><b>Windows voices</b><span class="faint">Built in, nothing to download. More robotic.</span></div>
+              <span></span>
+              <span class="vbtns">
+                <button class="btn sm ghost" title="Hear it" onclick={() => tryVoice("system")}><Play size={13} /></button>
+                {#if s.ttsModel === "system"}<span class="chip on">In use</span>{:else}<button class="btn sm" onclick={() => patch({ ttsModel: "system" })}>Use</button>{/if}
+              </span>
+            </div>
           </div>
 
           <h2><Footprints size={17} /> Dusty's presence</h2>
@@ -962,6 +1021,15 @@
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 40%, transparent);
     background: var(--accent-soft);
+  }
+  .sub {
+    margin: 18px 0 4px;
+    font-size: 14px;
+  }
+  .vbtns {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
   .bar {
     display: block;

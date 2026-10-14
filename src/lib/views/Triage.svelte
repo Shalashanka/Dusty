@@ -201,12 +201,30 @@
   const groups = $derived.by(() => {
     if (groupBy === "none") return [["", list]] as [string, Finding[]][];
     const m = new Map<string, Finding[]>();
+    const size = new Map<string, number>();
     for (const f of list) {
       const k = keyOf(f);
-      m.set(k, [...(m.get(k) ?? []), f]);
+      const g = m.get(k);
+      g ? g.push(f) : m.set(k, [f]);
+      size.set(k, (size.get(k) ?? 0) + f.bytes);
     }
-    return [...m.entries()].sort((a, b) => b[1].reduce((s, f) => s + f.bytes, 0) - a[1].reduce((s, f) => s + f.bytes, 0));
+    return [...m.entries()].sort((a, b) => size.get(b[0])! - size.get(a[0])!);
   });
+
+  /** Long groups render in pages so switching drives or filters stays instant. */
+  const PAGE = 60;
+  let shown = $state<Record<string, number>>({});
+  $effect(() => {
+    app.drive;
+    app.filter;
+    groupBy;
+    shown = {};
+  });
+  /** Only rows the user acted on fly away; rows that leave because the scope changed just go. */
+  const acted = new Set<string>();
+  function leaveRow(node: Element, id: string) {
+    return acted.has(id) ? fly(node, { x: -60, duration: 250 }) : { duration: 0 };
+  }
 
   function toggle(id: string) {
     const s = new Set(selected);
@@ -226,6 +244,7 @@
   }
   async function bulk(a: Action | "smart") {
     const items = selItems;
+    for (const f of items) acted.add(f.id);
     selected = new Set();
     if (a === "smart") {
       await app.removeSmart(items);
@@ -254,6 +273,7 @@
     ]);
   }
   function decideList(f: Finding, a: Action) {
+    acted.add(f.id);
     if (a === "organize") app.planFolder = f.path;
     else app.act([f], a);
   }
@@ -374,8 +394,8 @@
           </div>
         {/if}
         {#if !collapsed.has(g)}
-          {#each items as f (f.id)}
-            <div class="lrow" class:sel={selected.has(f.id)} oncontextmenu={(e) => rowMenu(e, f)} role="row" tabindex="-1" out:fly={{ x: -60, duration: 250 }}>
+          {#each items.slice(0, shown[g] ?? PAGE) as f (f.id)}
+            <div class="lrow" class:sel={selected.has(f.id)} oncontextmenu={(e) => rowMenu(e, f)} role="row" tabindex="-1" out:leaveRow={f.id}>
               <input type="checkbox" checked={selected.has(f.id)} onchange={() => toggle(f.id)} />
               <Preview path={f.path} ext={f.ext} isDir={f.isDir} size={34} color={f.kind === "system_junk" || f.kind === "dev_junk" ? KINDS[f.kind].color : ""} />
               <button class="lname" onclick={() => toggle(f.id)} ondblclick={() => (f.isDir ? api.reveal(f.path) : api.openFile(f.path))}>
@@ -393,6 +413,11 @@
               </span>
             </div>
           {/each}
+          {#if items.length > (shown[g] ?? PAGE)}
+            <button class="more" onclick={() => (shown = { ...shown, [g]: (shown[g] ?? PAGE) + 200 })}>
+              Show {Math.min(200, items.length - (shown[g] ?? PAGE))} more of {items.length - (shown[g] ?? PAGE)}
+            </button>
+          {/if}
         {/if}
       {/each}
     </div>
@@ -411,6 +436,20 @@
 </div>
 
 <style>
+  .more {
+    display: block;
+    margin: 6px auto 10px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    color: var(--text-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .more:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
   .triage {
     height: 100%;
     display: flex;

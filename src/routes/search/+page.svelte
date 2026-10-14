@@ -1,9 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-  import { fly, fade } from "svelte/transition";
-  import { cubicOut } from "svelte/easing";
+  import { fly, fade, scale } from "svelte/transition";
+  import { backOut, cubicOut } from "svelte/easing";
   import {
     Search,
     CornerDownLeft,
@@ -44,6 +43,11 @@
   let vstate = $state<"listening" | "thinking" | "idle">("idle");
   let level = $state(0);
   let heard = $state("");
+  /** Live transcript while speaking; words appear one by one. */
+  let partial = $state("");
+  const words = $derived(partial.split(/\s+/).filter(Boolean));
+  /** Set right after a voice query lands, so the search bar enters with a morph. */
+  let morphed = $state(false);
   let voiceError = $state("");
   let flash = $state("");
   let timer: ReturnType<typeof setTimeout>;
@@ -77,11 +81,14 @@
       res = null;
       sel = 0;
       heard = "";
+      partial = "";
+      morphed = false;
       voiceError = "";
       flash = "";
+      if (mode === "voice") vstate = "listening";
       settings = await api.getSettings().catch(() => settings);
       voice = await api.voiceStatus().catch(() => voice);
-      if (mode === "voice") vstate = "listening";
+      if (mode === "voice" && voice && !voice.hasMic) voiceError = voice.micHint;
       focus();
     });
     await listen<number>("voice-level", (e) => (level = e.payload));
@@ -90,23 +97,39 @@
       voiceError = e.payload;
       vstate = "idle";
     });
+    await listen<string>("voice-partial", (e) => {
+      if (mode === "voice") partial = e.payload;
+    });
     await listen<string>("voice-text", async (e) => {
+      partial = e.payload;
+      vstate = "idle";
+      // Let the last words land, then float up and become the search bar.
+      await new Promise((r) => setTimeout(r, 260));
       heard = e.payload;
+      morphed = true;
       mode = "search";
       q = e.payload;
-      vstate = "idle";
+      focus();
     });
   });
 
-  // Keep the window exactly as tall as the panel (the blur stays behind the panel only).
+  // The window hugs the panel (the blur stays behind the panel only). Dusty's
+  // core tweens the window, so search, commands and voice morph into each other.
   $effect(() => {
+    const m = mode;
     if (!panel || !("__TAURI_INTERNALS__" in window)) return;
-    const ro = new ResizeObserver(() => {
-      const h = Math.ceil(panel!.getBoundingClientRect().height);
-      getCurrentWindow().setSize(new LogicalSize(760, Math.max(80, h))).catch(() => {});
-    });
+    let raf = 0;
+    const send = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => api.barFit(m, Math.ceil(panel!.scrollHeight)).catch(() => {}));
+    };
+    const ro = new ResizeObserver(send);
     ro.observe(panel);
-    return () => ro.disconnect();
+    send();
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+    };
   });
 
   async function focus() {
@@ -139,15 +162,22 @@
     }, 60);
   });
 
-  /** Short spoken answer, local voices only (nothing leaves the PC). */
+  /** Short spoken answer with Dusty's on-device voice (nothing leaves the PC). */
   function speak(r: SearchResult) {
-    if (!("speechSynthesis" in window)) return;
+    const it = /\b(trova|cerca|foto|dell[ae]?|anno|scors[oa]|mese|settimana|ieri|grandi|il|la|le|di|che|mi|del)\b/i.test(heard);
     const n = r.hits.length;
-    const what = r.query.explain.slice(1).join(", ") || "files";
-    const text = n === 0 ? "I couldn't find anything like that." : n === 1 ? `I found one match: ${r.hits[0].name}.` : `I found ${n >= 50 ? "lots of" : n} ${what}. The top one is ${r.hits[0].name}.`;
+    const top = r.hits[0]?.name ?? "";
+    const text = it
+      ? n === 0 ? "Non ho trovato niente di simile." : n === 1 ? `Ho trovato un risultato: ${top}.` : `Ho trovato ${n >= 50 ? "molti" : n} risultati. Il primo è ${top}.`
+      : n === 0 ? "I couldn't find anything like that." : n === 1 ? `I found one match: ${top}.` : `I found ${n >= 50 ? "lots of" : n} ${r.query.explain.slice(1).join(", ") || "files"}. The top one is ${top}.`;
+    if (settings?.ttsModel && settings.ttsModel !== "system") {
+      api.say(text, it ? "it" : "en").catch(() => {});
+      return;
+    }
+    if (!("speechSynthesis" in window)) return;
     const u = new SpeechSynthesisUtterance(text);
     const local = speechSynthesis.getVoices().filter((v) => v.localService);
-    u.voice = local.find((v) => v.lang.startsWith("en")) ?? local[0] ?? null;
+    u.voice = local.find((v) => v.lang.startsWith(it ? "it" : "en")) ?? local[0] ?? null;
     u.rate = 1.05;
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
@@ -198,6 +228,7 @@
   function hide() {
     if ("speechSynthesis" in window) speechSynthesis.cancel();
     api.voiceStop().catch(() => {});
+    api.sayStop().catch(() => {});
     api.hideSearch();
   }
   async function open(i = sel) {
@@ -246,7 +277,8 @@
   function startVoice() {
     mode = "voice";
     heard = "";
-    voiceError = "";
+    partial = "";
+    voiceError = voice && !voice.hasMic ? voice.micHint : "";
     vstate = "listening";
     api.voiceListen().catch((e) => (voiceError = String(e)));
   }
@@ -262,17 +294,23 @@
 
 <svelte:window onkeydown={key} />
 
-<div class="panel" bind:this={panel} in:fly={{ y: -8, duration: 200, easing: cubicOut }}>
+<div class="panel" class:pill={mode === "voice"} bind:this={panel} in:fly={{ y: -8, duration: 200, easing: cubicOut }}>
   {#if mode === "voice"}
-    <div class="voice">
+    <div class="voice" out:fade={{ duration: 140 }}>
       {#if voiceReady}
-        <VoiceOrb {level} state={vstate} height={120} />
-        <p class="vstate" in:fade>
-          {#if voiceError}{voiceError}
-          {:else if vstate === "thinking"}Got it, one sec…
-          {:else if vstate === "listening"}I'm listening. Ask for any file, like “the invoice PDF from March”.
-          {:else}Press <span class="kbd">{settings?.voiceHotkey}</span> to ask again{/if}
-        </p>
+        <div class="orb"><VoiceOrb {level} state={voiceError ? "idle" : vstate} height={78} /></div>
+        {#if words.length && !voiceError}
+          <p class="words" aria-live="polite">
+            {#each words as w, i (i + ":" + w)}<span class="w" style="--i:{i}">{w}</span>{" "}{/each}
+          </p>
+        {:else}
+          <p class="vstate" class:err={!!voiceError} in:fade>
+            {#if voiceError}{voiceError}
+            {:else if vstate === "thinking"}Got it, one sec…
+            {:else if vstate === "listening"}I'm listening. Ask for any file, like “the invoice PDF from March”.
+            {:else}Press <span class="kbd">{settings?.voiceHotkey}</span> to ask again{/if}
+          </p>
+        {/if}
         {#if voiceError}<button class="btn sm" onclick={startVoice}><Mic size={13} /> Try again</button>{/if}
       {:else}
         <div class="vsetup">
@@ -286,8 +324,14 @@
       {/if}
     </div>
   {:else}
-    <div class="bar" data-tauri-drag-region>
-      {#if mode === "commands"}<Command size={19} class="accent" />{:else}<Search size={20} class="faint" />{/if}
+    <div class="bar" class:morphed data-tauri-drag-region>
+      <span class="modeicon">
+        {#key mode}
+          <span class="mi" in:scale={{ start: 0.4, duration: 260, easing: backOut }}>
+            {#if mode === "commands"}<Command size={19} class="accent" />{:else if morphed}<Mic size={19} class="accent" />{:else}<Search size={20} class="faint" />{/if}
+          </span>
+        {/key}
+      </span>
       <input
         bind:this={input}
         bind:value={q}
@@ -304,7 +348,7 @@
     {#if flash}
       <p class="flash" in:fly={{ y: 4, duration: 200 }}><Sparkles size={14} /> {flash}</p>
     {:else if mode === "commands"}
-      <div class="cmds">
+      <div class="cmds" in:fade={{ duration: 180 }}>
         {#each commands as c, i (c.id)}
           {@const I = c.icon}
           <button class="row cmd" class:sel={i === sel} onmouseenter={() => (sel = i)} onclick={() => c.run()}>
@@ -553,18 +597,80 @@
     color: var(--ok);
     opacity: 0.8;
   }
+  /* The voice pill: low on the screen, centred, the same glass as the bar. */
+  .panel.pill {
+    inset: 0;
+    border-radius: 22px;
+  }
   .voice {
-    padding: 18px 18px 16px;
+    height: 100%;
+    padding: 10px 22px 14px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    gap: 4px;
+  }
+  .orb {
+    width: 100%;
   }
   .vstate {
     margin: 0;
-    font-size: 14px;
+    font-size: 13.5px;
     color: var(--text-2);
     text-align: center;
+  }
+  .vstate.err {
+    color: var(--text);
+    font-size: 12.5px;
+    max-width: 480px;
+  }
+  /* Words land one by one as the model hears them. */
+  .words {
+    margin: 0;
+    max-width: 100%;
+    text-align: center;
+    font: 600 18px/1.35 var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  .w {
+    display: inline-block;
+    animation: word 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes word {
+    from {
+      opacity: 0;
+      filter: blur(6px);
+      transform: translateY(6px);
+    }
+  }
+  .modeicon {
+    display: grid;
+    width: 22px;
+    place-items: center;
+  }
+  .mi {
+    grid-area: 1 / 1;
+    display: grid;
+  }
+  /* After a voice query: the typed bar rises out of the pill. */
+  .bar.morphed {
+    animation: rise 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .bar.morphed input {
+    animation: settle 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  @keyframes rise {
+    from {
+      transform: translateY(24px) scale(0.97);
+      opacity: 0.4;
+    }
+  }
+  @keyframes settle {
+    from {
+      letter-spacing: 0.04em;
+      filter: blur(3px);
+    }
   }
   .vsetup {
     width: 100%;

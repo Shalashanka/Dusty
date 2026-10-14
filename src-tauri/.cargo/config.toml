@@ -1,8 +1,3 @@
-[env]
-# bindgen (whisper.cpp bindings) needs libclang. Get it once with:
-#   python -m pip install libclang --target src-tauri/.tools/libclang
-LIBCLANG_PATH = { value = ".tools/libclang/clang/native", relative = true }
-
 # sherpa-onnx / onnxruntime are linked statically (no DLLs to ship). Their prebuilt
 # libraries use the static C runtime and Windows event tracing (advapi32).
 [target.x86_64-pc-windows-msvc]

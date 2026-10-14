@@ -74,7 +74,7 @@ A whole-drive index (millions of files, searched in milliseconds) behind a **glo
 Press `Ctrl+Alt+D` and say *"find the invoice PDF I downloaded about five months ago"*.
 Speech is recognised **on your PC** by small open models (Moonshine for English, NVIDIA Parakeet
 for 25 languages), in about a third of a second. Dusty shows how it understood you and searches.
-It can answer out loud with your local Windows voices (off by default). Voice only *searches*;
+It can answer out loud (off by default) with a small neural voice that also runs on your PC: Supertonic 3, Kokoro or Kitten. Queries work in English, Italian, Spanish, French, German and Portuguese. Voice only *searches*;
 it never controls your PC.
 
 ### ⌨️ Commands from anywhere
@@ -162,8 +162,7 @@ cargo test --release real_scan  -- --ignored --nocapture   # read-only scan of t
 cargo test --release real_index -- --ignored --nocapture   # index all drives, time searches
 ```
 
-The speech engine is linked statically; its bindings need libclang once:
-`pip install libclang --target src-tauri/.tools/libclang` (picked up by `src-tauri/.cargo/config.toml`).
+The speech engine (sherpa-onnx) is linked statically, so `dusty.exe` ships without extra DLLs.
 
 ### Releases & updates
 

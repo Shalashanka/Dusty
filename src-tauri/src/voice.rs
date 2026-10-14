@@ -10,8 +10,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use parking_lot::Mutex;
 use serde::Serialize;
-use sherpa_rs::moonshine::{MoonshineConfig, MoonshineRecognizer};
-use sherpa_rs::transducer::{TransducerConfig, TransducerRecognizer};
+use sherpa_onnx::{OfflineMoonshineModelConfig, OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -53,17 +52,14 @@ pub fn model_info(id: &str) -> &'static ModelInfo {
     MODELS.iter().find(|m| m.id == id).unwrap_or(&MODELS[0])
 }
 
-enum Engine {
-    Moonshine(MoonshineRecognizer),
-    Parakeet(TransducerRecognizer),
-}
+struct Engine(OfflineRecognizer);
 
 impl Engine {
     fn transcribe(&mut self, audio: &[f32]) -> String {
-        match self {
-            Engine::Moonshine(r) => r.transcribe(16_000, audio).text,
-            Engine::Parakeet(r) => r.transcribe(16_000, audio),
-        }
+        let stream = self.0.create_stream();
+        stream.accept_waveform(16_000, audio);
+        self.0.decode(&stream);
+        stream.get_result().map(|r| r.text).unwrap_or_default()
     }
 }
 
@@ -84,6 +80,7 @@ pub struct VoiceStatus {
     pub downloading: bool,
     pub listening: bool,
     pub has_mic: bool,
+    pub mic_hint: String,
     pub models: Vec<VoiceModel>,
 }
 
@@ -118,6 +115,7 @@ pub fn status(data: &Path, state: &VoiceState, model: &str) -> VoiceStatus {
         downloading: state.downloading.load(Ordering::Relaxed),
         listening: state.listening.load(Ordering::Relaxed),
         has_mic: cpal::default_host().default_input_device().is_some(),
+        mic_hint: if cpal::default_host().default_input_device().is_some() { String::new() } else { no_mic_message() },
         models: MODELS
             .iter()
             .map(|x| VoiceModel {
@@ -133,58 +131,61 @@ pub fn status(data: &Path, state: &VoiceState, model: &str) -> VoiceStatus {
 
 /// Downloads and unpacks a model with progress events ("voice-download": 0..1).
 pub fn download(app: &AppHandle, data: &Path, state: &VoiceState, model: &str) -> Result<(), String> {
-    use std::io::{Read, Write};
     if state.downloading.swap(true, Ordering::SeqCst) {
         return Err("already downloading".into());
     }
-    let r = (|| {
-        let m = model_info(model);
-        let dir = models_dir(data);
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let archive = dir.join(m.url);
-        let resp = ureq::get(&format!("{BASE}{}", m.url)).call().map_err(|e| format!("download failed: {e}"))?;
-        let total = resp
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(m.mb as u64 * 1_048_576);
-        let mut reader = resp.into_body().into_with_config().limit(4 << 30).reader();
-        let mut out = std::fs::File::create(&archive).map_err(|e| e.to_string())?;
-        let mut buf = vec![0u8; 1 << 16];
-        let mut done = 0u64;
-        let mut last = Instant::now();
-        loop {
-            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
-            }
-            out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
-            done += n as u64;
-            if last.elapsed() > Duration::from_millis(150) {
-                let _ = app.emit("voice-download", (done as f64 / total as f64).min(0.97));
-                last = Instant::now();
-            }
-        }
-        drop(out);
-        let _ = app.emit("voice-download", 0.98);
-        let f = std::fs::File::open(&archive).map_err(|e| e.to_string())?;
-        tar::Archive::new(bzip2::read::BzDecoder::new(std::io::BufReader::new(f)))
-            .unpack(&dir)
-            .map_err(|e| format!("couldn't unpack the model: {e}"))?;
-        let _ = std::fs::remove_file(&archive);
-        if !installed(data, m) {
-            return Err("the model archive looked different than expected".into());
-        }
-        let _ = app.emit("voice-download", 1.0);
-        Ok(())
-    })();
+    let m = model_info(model);
+    let r = fetch_archive(app, &models_dir(data), &format!("{BASE}{}", m.url), m.mb, "voice-download")
+        .and_then(|_| if installed(data, m) { Ok(()) } else { Err("the model archive looked different than expected".into()) });
     state.downloading.store(false, Ordering::SeqCst);
     r
 }
 
+/// Streams a `.tar.bz2` model archive into `dir` and unpacks it, emitting
+/// `event` with progress 0..1. Shared by speech recognition and Dusty's voices.
+pub fn fetch_archive(app: &AppHandle, dir: &Path, url: &str, mb: u32, event: &str) -> Result<(), String> {
+    use std::io::{Read, Write};
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let name = url.rsplit('/').next().unwrap_or("model.tar.bz2");
+    let archive = dir.join(name);
+    let resp = ureq::get(url).call().map_err(|e| format!("download failed: {e}"))?;
+    let total = resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(mb as u64 * 1_048_576);
+    let mut reader = resp.into_body().into_with_config().limit(4 << 30).reader();
+    let mut out = std::fs::File::create(&archive).map_err(|e| e.to_string())?;
+    let mut buf = vec![0u8; 1 << 16];
+    let mut done = 0u64;
+    let mut last = Instant::now();
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        done += n as u64;
+        if last.elapsed() > Duration::from_millis(150) {
+            let _ = app.emit(event, (done as f64 / total as f64).min(0.97));
+            last = Instant::now();
+        }
+    }
+    drop(out);
+    let _ = app.emit(event, 0.98);
+    let f = std::fs::File::open(&archive).map_err(|e| e.to_string())?;
+    let unpacked = tar::Archive::new(bzip2::read::BzDecoder::new(std::io::BufReader::new(f)))
+        .unpack(dir)
+        .map_err(|e| format!("couldn't unpack the model: {e}"));
+    let _ = std::fs::remove_file(&archive);
+    unpacked?;
+    let _ = app.emit(event, 1.0);
+    Ok(())
+}
+
 /// First file in `dir` whose name starts with `prefix` (prefers int8 builds).
-fn find(dir: &Path, prefix: &str) -> Result<String, String> {
+pub(crate) fn find(dir: &Path, prefix: &str) -> Result<String, String> {
     let mut hits: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| e.to_string())?
         .flatten()
@@ -204,34 +205,30 @@ fn load(data: &Path, m: &ModelInfo) -> Result<Engine, String> {
         return Err("the voice model isn't downloaded yet".into());
     }
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8) as i32;
-    let tokens = dir.join("tokens.txt").to_string_lossy().into_owned();
+    let mut config = OfflineRecognizerConfig::default();
+    config.model_config.tokens = Some(dir.join("tokens.txt").to_string_lossy().into_owned());
+    config.model_config.num_threads = threads;
     match m.id {
-        "moonshine" => MoonshineRecognizer::new(MoonshineConfig {
-            preprocessor: find(&dir, "preprocess")?,
-            encoder: find(&dir, "encode")?,
-            uncached_decoder: find(&dir, "uncached_decode")?,
-            cached_decoder: find(&dir, "cached_decode")?,
-            tokens,
-            num_threads: Some(threads),
-            ..Default::default()
-        })
-        .map(Engine::Moonshine)
-        .map_err(|e| e.to_string()),
-        _ => TransducerRecognizer::new(TransducerConfig {
-            encoder: find(&dir, "encoder")?,
-            decoder: find(&dir, "decoder")?,
-            joiner: find(&dir, "joiner")?,
-            tokens,
-            num_threads: threads,
-            sample_rate: 16_000,
-            feature_dim: 80,
-            decoding_method: "greedy_search".into(),
-            model_type: "nemo_transducer".into(),
-            ..Default::default()
-        })
-        .map(Engine::Parakeet)
-        .map_err(|e| e.to_string()),
+        "moonshine" => {
+            config.model_config.moonshine = OfflineMoonshineModelConfig {
+                preprocessor: Some(find(&dir, "preprocess")?),
+                encoder: Some(find(&dir, "encode")?),
+                uncached_decoder: Some(find(&dir, "uncached_decode")?),
+                cached_decoder: Some(find(&dir, "cached_decode")?),
+                merged_decoder: None,
+            };
+        }
+        _ => {
+            config.model_config.transducer = OfflineTransducerModelConfig {
+                encoder: Some(find(&dir, "encoder")?),
+                decoder: Some(find(&dir, "decoder")?),
+                joiner: Some(find(&dir, "joiner")?),
+            };
+            config.model_config.model_type = Some("nemo_transducer".into());
+            config.decoding_method = Some("greedy_search".into());
+        }
     }
+    OfflineRecognizer::create(&config).map(Engine).ok_or_else(|| "couldn't load the voice model".to_string())
 }
 
 fn transcribe_with(data: &Path, state: &VoiceState, model: &str, audio: &[f32]) -> Result<String, String> {
@@ -280,7 +277,7 @@ pub fn stop(state: &VoiceState) {
 
 /// Records until the speaker goes quiet, then transcribes. Emits:
 /// "voice-level" (0..1, ~25/s), "voice-state" ("listening"|"thinking"|"idle"),
-/// "voice-text" (final transcript) or "voice-error".
+/// "voice-partial" (live transcript so far), "voice-text" (final transcript) or "voice-error".
 pub fn listen(app: AppHandle, model: String) {
     let state = app.state::<crate::state::AppState>();
     if state.voice.listening.swap(true, Ordering::SeqCst) {
@@ -292,7 +289,7 @@ pub fn listen(app: AppHandle, model: String) {
     let app2 = app.clone();
     std::thread::spawn(move || {
         let st = app2.state::<crate::state::AppState>();
-        let result = record(&app2, &st.voice).and_then(|(audio, rate)| {
+        let result = record(&app2, &st.voice, &data, &model).and_then(|(audio, rate)| {
             let _ = app2.emit("voice-state", "thinking");
             let t = Instant::now();
             let text = transcribe_with(&data, &st.voice, &model, &resample(&audio, rate, 16_000));
@@ -315,9 +312,20 @@ pub fn listen(app: AppHandle, model: String) {
     });
 }
 
-fn record(app: &AppHandle, voice: &VoiceState) -> Result<(Vec<f32>, u32), String> {
+/// Why there's no microphone, in words the user can act on.
+fn no_mic_message() -> String {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
+    if unsafe { GetSystemMetrics(SM_REMOTESESSION) } != 0 {
+        "No microphone in this Remote Desktop session. In Remote Desktop: Show options › Local resources ›          Remote audio › Settings › \"Record from this computer\", then reconnect."
+            .into()
+    } else {
+        "No microphone found. Plug one in, or check Settings › Privacy › Microphone.".into()
+    }
+}
+
+fn record(app: &AppHandle, voice: &VoiceState, data: &Path, model: &str) -> Result<(Vec<f32>, u32), String> {
     let host = cpal::default_host();
-    let device = host.default_input_device().ok_or("no microphone found")?;
+    let device = host.default_input_device().ok_or_else(no_mic_message)?;
     let supported = device.default_input_config().map_err(|e| e.to_string())?;
     let rate = supported.sample_rate();
     let channels = supported.channels() as usize;
@@ -373,6 +381,13 @@ fn record(app: &AppHandle, voice: &VoiceState) -> Result<(Vec<f32>, u32), String
     stream.play().map_err(|e| e.to_string())?;
     let _ = app.emit("voice-state", "listening");
 
+    // Live transcript: while speaking, the audio so far is re-transcribed about
+    // twice a second on a helper thread and shown word by word.
+    let partial_busy = Arc::new(AtomicBool::new(false));
+    let finished = Arc::new(AtomicBool::new(false));
+    let mut last_partial = Instant::now();
+    let mut partial_len = 0usize;
+
     // Endpointing: wait for speech, then stop after ~0.9 s of quiet.
     let started = Instant::now();
     let mut noise_floor = 0.004f32;
@@ -396,6 +411,27 @@ fn record(app: &AppHandle, voice: &VoiceState) -> Result<(Vec<f32>, u32), String
                 break;
             }
         }
+        let len = samples.lock().len();
+        if heard
+            && last_partial.elapsed() > Duration::from_millis(450)
+            && len > partial_len + rate as usize / 5
+            && !partial_busy.swap(true, Ordering::SeqCst)
+        {
+            last_partial = Instant::now();
+            partial_len = len;
+            let audio = resample(&samples.lock()[..len], rate, 16_000);
+            let (app, data, model) = (app.clone(), data.to_path_buf(), model.to_string());
+            let (busy, finished) = (partial_busy.clone(), finished.clone());
+            std::thread::spawn(move || {
+                let st = app.state::<crate::state::AppState>();
+                if let Ok(text) = transcribe_with(&data, &st.voice, &model, &audio) {
+                    if !finished.load(Ordering::SeqCst) && !text.is_empty() {
+                        let _ = app.emit("voice-partial", text);
+                    }
+                }
+                busy.store(false, Ordering::SeqCst);
+            });
+        }
         if voice.stop.load(Ordering::SeqCst)
             || started.elapsed() > Duration::from_secs(15)
             || (!heard && started.elapsed() > Duration::from_secs(6))
@@ -404,6 +440,7 @@ fn record(app: &AppHandle, voice: &VoiceState) -> Result<(Vec<f32>, u32), String
         }
     }
     drop(stream);
+    finished.store(true, Ordering::SeqCst);
     let audio = std::mem::take(&mut *samples.lock());
     if !heard && !voice.stop.load(Ordering::SeqCst) {
         return Err("I didn't hear anything. Is the microphone on?".into());
@@ -433,6 +470,32 @@ pub fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Transcribes WAV files listed in DUSTY_WAVS (comma separated) with Parakeet:
+    /// `cargo test --release hear_wavs -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn hear_wavs() {
+        let data = dirs::data_local_dir().unwrap().join("com.griz.dusty");
+        let state = VoiceState::default();
+        for f in std::env::var("DUSTY_WAVS").unwrap().split(',') {
+            let w = sherpa_onnx::Wave::read(f).expect("wav");
+            let pcm = resample(w.samples(), w.sample_rate() as u32, 16_000);
+            println!("{f}: {:?}", transcribe_with(&data, &state, "parakeet", &pcm));
+        }
+    }
+
+    /// `cargo test mics -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn mics() {
+        let host = cpal::default_host();
+        println!("host {:?}", host.id());
+        println!("default input: {:?}", host.default_input_device().map(|d| d.description().map(|x| format!("{x:?}"))));
+        for d in host.input_devices().unwrap() {
+            println!("input: {:?} -> {:?}", d.description().map(|x| format!("{x:?}")), d.default_input_config().map(|c| (c.sample_rate(), c.channels())));
+        }
+    }
 
     fn read_wav(path: &Path) -> (Vec<f32>, u32) {
         let b = std::fs::read(path).unwrap();

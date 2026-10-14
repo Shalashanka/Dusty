@@ -1,6 +1,6 @@
 [package]
 name = "dusty"
-version = "0.3.0"
+version = "0.3.1"
 description = "A tiny housekeeper for your PC"
 authors = ["Griseld Islamaj"]
 edition = "2024"
@@ -12,7 +12,7 @@ edition = "2024"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "dusty_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -44,7 +44,7 @@ zip = { version = "9.0.2", default-features = false, features = ["deflate"] }
 cpal = "0.18.2"
 ureq = "3.4.2"
 minisign-verify = "0.3.0"
-sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries", "static"] }
+sherpa-onnx = "1.13.8"
 tar = "0.4.46"
 bzip2 = "0.6.1"
 memchr = "2.8.3"

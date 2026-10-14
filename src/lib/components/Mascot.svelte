@@ -30,9 +30,18 @@
     overrideTimer = setTimeout(() => (override = null), ms);
   }
 
-  /** Petting Dusty: a happy hop and a few hearts. */
+  /** Petting Dusty: a happy hop and a few hearts; pet a lot and Dusty twirls. */
+  let pets: number[] = [];
+  let twirl = $state(false);
   function pet() {
     if (!interactive) return;
+    const t0 = Date.now();
+    pets = [...pets.filter((p) => t0 - p < 2500), t0];
+    if (pets.length >= 5) {
+      pets = [];
+      twirl = true;
+      setTimeout(() => (twirl = false), 1100);
+    }
     react("happy", 1800);
     hop = true;
     setTimeout(() => (hop = false), 600);
@@ -108,6 +117,7 @@
   bind:this={el}
   class="mascot {mood}"
   class:hopping={hop}
+  class:twirl
   width={size}
   height={size}
   viewBox="0 0 200 200"
@@ -255,6 +265,21 @@
 </span>
 
 <style>
+  .mascot.twirl.twirl {
+    animation: twirl 1.1s cubic-bezier(0.34, 1.3, 0.64, 1);
+    transform-origin: 50% 55%;
+  }
+  @keyframes twirl {
+    0% {
+      transform: rotate(0) scale(1);
+    }
+    40% {
+      transform: rotate(200deg) scale(1.08);
+    }
+    100% {
+      transform: rotate(360deg) scale(1);
+    }
+  }
   .wrap {
     position: relative;
     display: inline-block;
